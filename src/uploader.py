@@ -1,5 +1,4 @@
 import os
-import random
 from googleapiclient.http import MediaFileUpload
 from googleapiclient.errors import HttpError
 from src.config import DEFAULT_PRIVACY, DEFAULT_CATEGORY, DEFAULT_LANGUAGE
@@ -7,13 +6,15 @@ from src.database import Database
 from src.title_generator import TitleGenerator
 from src.thumbnail_editor import ThumbnailEditor
 
+
 class VideoUploader:
+
     def __init__(self, youtube, target_channel_id=None):
-        self.youtube          = youtube
+        self.youtube           = youtube
         self.target_channel_id = target_channel_id
-        self.db               = Database()
-        self.title_gen        = TitleGenerator()
-        self.thumb_editor     = ThumbnailEditor()
+        self.db                = Database()
+        self.title_gen         = TitleGenerator()
+        self.thumb_editor      = ThumbnailEditor()
 
     def upload_video(self, video_info):
         video_file = video_info.get("video_file")
@@ -21,13 +22,22 @@ class VideoUploader:
             print("❌ Video file not found")
             return None
 
-        video_id    = video_info.get("video_id")
-        new_title   = self.title_gen.generate_title(video_info.get("title", "Video"))
-        new_desc    = self.title_gen.generate_description(video_info.get("description", ""))
+        video_id  = video_info.get("video_id")
+        new_title = self.title_gen.generate_title(video_info.get("title", "Video"))
+        new_desc  = self.title_gen.generate_description(video_info.get("description", ""))
+
+        # ✅ Get blocked countries from source video
+        blocked_countries = video_info.get("blocked_countries", [])
 
         print(f"📤 Uploading to @TekoGopal-o6f5f")
-        print(f"   Title: {new_title}")
+        print(f"   Title   : {new_title}")
 
+        if blocked_countries:
+            print(f"   Blocking: {blocked_countries} (same as source)")
+        else:
+            print(f"   Blocking: None (source has no restrictions)")
+
+        # Build request body
         body = {
             "snippet": {
                 "title"               : new_title,
@@ -40,8 +50,19 @@ class VideoUploader:
             "status": {
                 "privacyStatus"          : DEFAULT_PRIVACY,
                 "selfDeclaredMadeForKids": False,
+                "embeddable"             : True,
             }
         }
+
+        # ✅ Apply same country restrictions as source
+        part = "snippet,status"
+        if blocked_countries:
+            body["contentDetails"] = {
+                "regionRestriction": {
+                    "blocked": blocked_countries
+                }
+            }
+            part = "snippet,status,contentDetails"
 
         media = MediaFileUpload(
             video_file,
@@ -50,17 +71,19 @@ class VideoUploader:
         )
 
         try:
-            # ✅ Insert video to specific channel
-            insert_request = self.youtube.videos().insert(
-                part       = "snippet,status",
+            request  = self.youtube.videos().insert(
+                part       = part,
                 body       = body,
                 media_body = media
             )
-            response    = insert_request.execute()
+            response    = request.execute()
             uploaded_id = response.get("id")
 
             print(f"✅ Uploaded! ID: {uploaded_id}")
             print(f"🔗 https://youtu.be/{uploaded_id}")
+
+            if blocked_countries:
+                print(f"🌍 Blocked in: {len(blocked_countries)} countries (same as source)")
 
             # Set thumbnail
             thumb = video_info.get("thumbnail_file")
@@ -68,15 +91,14 @@ class VideoUploader:
                 modified = self.thumb_editor.modify_thumbnail(thumb)
                 if modified:
                     try:
-                        media_thumb = MediaFileUpload(
-                            modified, mimetype="image/jpeg"
-                        )
                         self.youtube.thumbnails().set(
                             videoId    = uploaded_id,
-                            media_body = media_thumb
+                            media_body = MediaFileUpload(
+                                modified, mimetype="image/jpeg"
+                            )
                         ).execute()
                         print("🖼️ Thumbnail set!")
-                    except HttpError as e:
+                    except Exception as e:
                         print(f"⚠️ Thumbnail error: {e}")
 
             self.db.mark_video_uploaded(video_id, {"title": new_title})
@@ -89,4 +111,7 @@ class VideoUploader:
 
         except HttpError as e:
             print(f"❌ Upload failed: {e}")
+            return None
+        except Exception as e:
+            print(f"❌ Error: {e}")
             return None
