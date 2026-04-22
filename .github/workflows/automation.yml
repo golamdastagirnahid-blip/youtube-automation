@@ -1,0 +1,55 @@
+name: YouTube Automation
+
+on:
+  repository_dispatch:
+    types: [new_video_detected]
+  workflow_dispatch:
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install FFmpeg
+        run: sudo apt-get install -y ffmpeg
+
+      - name: Install Dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore Database
+        uses: actions/cache@v4
+        with:
+          path: database.json
+          key: db-v1
+          restore-keys: db-v1
+
+      - name: Create Credentials
+        run: |
+          echo '${{ secrets.CLIENT_SECRETS }}' > client_secrets.json
+          echo '${{ secrets.YOUTUBE_TOKEN }}' > token.json
+
+      - name: Run Automation
+        run: python main.py run
+        env:
+          VIDEO_ID     : ${{ github.event.client_payload.video_id }}
+          VIDEO_URL    : ${{ github.event.client_payload.video_url }}
+          VIDEO_TITLE  : ${{ github.event.client_payload.video_title }}
+          VIDEO_PRIVACY: public
+
+      - name: Save Database
+        if: always()
+        run: |
+          git config user.name "automation-bot"
+          git config user.email "bot@github.com"
+          git add database.json || true
+          git diff --staged --quiet || git commit -m "Update database - $(date)"
+          git push || true
