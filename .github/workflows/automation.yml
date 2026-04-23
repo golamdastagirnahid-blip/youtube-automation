@@ -50,67 +50,49 @@ jobs:
         run: |
           echo "🌐 Installing Windscribe VPN..."
 
-          # Download Windscribe
+          # Download and Install
           wget -q "https://windscribe.com/install/desktop/linux_deb_x64" \
             -O windscribe.deb
-
-          # Install Windscribe
           sudo dpkg -i windscribe.deb 2>/dev/null || true
           sudo apt-get install -f -y 2>/dev/null || true
 
-          # Find windscribe binary location
-          echo "🔍 Finding windscribe binary..."
-          find / -name "windscribe" -type f 2>/dev/null || true
-          ls /usr/bin/winds* 2>/dev/null || true
-          ls /usr/local/bin/winds* 2>/dev/null || true
-          ls /opt/windscribe* 2>/dev/null || true
+          # Correct binary path
+          WINDSCRIBE="/opt/windscribe/windscribe-cli"
 
-          # Add possible paths
-          export PATH=$PATH:/usr/bin:/usr/local/bin:/opt/windscribe
-
-          # Start service
-          echo "🚀 Starting Windscribe service..."
+          # Start helper service
+          echo "🚀 Starting Windscribe helper service..."
           sudo systemctl start windscribe-helper 2>/dev/null || true
-          sudo systemctl start windscribe 2>/dev/null || true
           sleep 5
 
-          # Check all possible windscribe locations
-          WINDSCRIBE_CMD=""
-          for cmd in \
-            windscribe \
-            /usr/bin/windscribe \
-            /usr/local/bin/windscribe \
-            /opt/windscribe/windscribe \
-            /usr/lib/windscribe/windscribe
-          do
-            if command -v "$cmd" &>/dev/null || [ -f "$cmd" ]; then
-              WINDSCRIBE_CMD="$cmd"
-              echo "✅ Found windscribe at: $cmd"
-              break
-            fi
-          done
-
-          if [ -z "$WINDSCRIBE_CMD" ]; then
-            echo "❌ Windscribe binary not found!"
-            echo "📂 Checking installed files..."
-            dpkg -L windscribe 2>/dev/null | head -30 || true
-          else
-            echo "🔐 Logging into Windscribe..."
-            "$WINDSCRIBE_CMD" login \
-              ${{ secrets.WINDSCRIBE_USERNAME }} \
-              ${{ secrets.WINDSCRIBE_PASSWORD }} || true
-
-            sleep 3
-
-            echo "🔌 Connecting to India..."
-            "$WINDSCRIBE_CMD" connect India || true
-
-            sleep 20
-
-            echo "✅ VPN Status:"
-            "$WINDSCRIBE_CMD" status || true
+          # Check binary exists
+          if [ ! -f "$WINDSCRIBE" ]; then
+            echo "❌ windscribe-cli not found at $WINDSCRIBE"
+            exit 1
           fi
 
+          echo "✅ windscribe-cli found!"
+
+          # Login
+          echo "🔐 Logging into Windscribe..."
+          sudo "$WINDSCRIBE" login \
+            ${{ secrets.WINDSCRIBE_USERNAME }} \
+            ${{ secrets.WINDSCRIBE_PASSWORD }}
+
+          sleep 3
+
+          # Connect to India
+          echo "🔌 Connecting to India server..."
+          sudo "$WINDSCRIBE" connect India
+
+          echo "⏳ Waiting 20 seconds for VPN to stabilize..."
+          sleep 20
+
+          # Status check
+          echo ""
+          echo "✅ VPN Status:"
+          sudo "$WINDSCRIBE" status || true
+
+          # Location check
           echo ""
           echo "🌍 Current IP and Location:"
           curl -s https://ipapi.co/json/ | python3 -c "
@@ -120,8 +102,12 @@ jobs:
               print(f'  IP      : {d[\"ip\"]}')
               print(f'  Country : {d[\"country_name\"]}')
               print(f'  City    : {d[\"city\"]}')
-          except:
-              print('  Could not get location info')
+              if d['country_name'] == 'India':
+                  print('  ✅ SUCCESS - Connected to India!')
+              else:
+                  print('  ⚠️ WARNING - Not India, trying again...')
+          except Exception as e:
+              print(f'  Error: {e}')
           " || true
 
       # ── Step 5: Install Dependencies ──────────────────
@@ -179,7 +165,7 @@ jobs:
             echo "VIDEO_ID=${{ github.event.client_payload.video_id }}"           >> $GITHUB_ENV
             echo "VIDEO_URL=${{ github.event.client_payload.video_url }}"         >> $GITHUB_ENV
             echo "VIDEO_TITLE=${{ github.event.client_payload.video_title }}"     >> $GITHUB_ENV
-            echo "VIDEO_PRIVACY=${{ github.event.client_payload.video_price }}"   >> $GITHUB_ENV
+            echo "VIDEO_PRIVACY=${{ github.event.client_payload.video_privacy }}" >> $GITHUB_ENV
           fi
 
       # ── Step 10: Show Video Info ───────────────────────
@@ -201,7 +187,7 @@ jobs:
       # ── Step 12: Test Video Access ─────────────────────
       - name: Test Video Access
         run: |
-          echo "🧪 Testing video access..."
+          echo "🧪 Testing video access through VPN..."
           yt-dlp \
             --extractor-args "youtube:player_client=ios,android" \
             --geo-bypass \
