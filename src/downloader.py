@@ -5,7 +5,6 @@ Multiple download methods with automatic fallback
 
 import os
 import time
-import random
 import requests
 import yt_dlp
 from src.config        import DOWNLOADS_DIR, VIDEO_QUALITY
@@ -23,132 +22,184 @@ class VideoDownloader:
         print(f"📥 Downloading: {video_id}")
 
         methods = [
-            self._method_1_cookies,
-            self._method_2_cookies_geo_bypass,
-            self._method_3_with_proxy,
-            self._method_4_invidious,
+            self._method_1_ios_client,
+            self._method_2_android_client,
+            self._method_3_tv_client,
+            self._method_4_with_proxy,
+            self._method_5_cookies_only,
         ]
 
         for i, method in enumerate(methods, 1):
             print(f"   🔄 Trying method {i}/{len(methods)}...")
-            result = method(video_url, video_id)
-            if result:
-                print(f"   ✅ Method {i} succeeded!")
-                return result
+            try:
+                result = method(video_url, video_id)
+                if result:
+                    print(f"   ✅ Method {i} succeeded!")
+                    return result
+            except Exception as e:
+                pass
             print(f"   ❌ Method {i} failed, trying next...")
-            time.sleep(2)
+            time.sleep(3)
 
         print("❌ All download methods failed")
         return None
 
-    # ── Method 1: Cookies Only ────────────
-    def _method_1_cookies(self, video_url, video_id):
+    # ─────────────────────────────────────────────
+    # Method 1: iOS Client (Most Powerful - Bypasses Geo)
+    # ─────────────────────────────────────────────
+    def _method_1_ios_client(self, video_url, video_id):
         output_path = os.path.join(DOWNLOADS_DIR, f"{video_id}.%(ext)s")
         ydl_opts = {
-            'format'        : VIDEO_QUALITY,
-            'outtmpl'       : output_path,
-            'writethumbnail': True,
-            'quiet'         : True,
-            'no_warnings'   : True,
-            'cookiefile'    : 'cookies.txt',
-            'postprocessors': [{
+            'format'         : VIDEO_QUALITY,
+            'outtmpl'        : output_path,
+            'writethumbnail' : True,
+            'quiet'          : True,
+            'no_warnings'    : True,
+            'cookiefile'     : 'cookies.txt',
+            'geo_bypass'     : True,
+            'extractor_args' : {
+                'youtube': {
+                    'player_client': ['ios'],
+                }
+            },
+            'http_headers'   : {
+                'User-Agent': (
+                    'com.google.ios.youtube/19.29.1 '
+                    '(iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X)'
+                ),
+            },
+            'postprocessors' : [{
                 'key'           : 'FFmpegVideoConvertor',
-                'preferedformat': 'mp4'
+                'preferedformat': 'mp4',
             }],
         }
         return self._run_download(ydl_opts, video_url, video_id)
 
-    # ── Method 2: Cookies + Geo Bypass ───
-    def _method_2_cookies_geo_bypass(self, video_url, video_id):
+    # ─────────────────────────────────────────────
+    # Method 2: Android Client
+    # ─────────────────────────────────────────────
+    def _method_2_android_client(self, video_url, video_id):
         output_path = os.path.join(DOWNLOADS_DIR, f"{video_id}.%(ext)s")
         ydl_opts = {
-            'format'            : VIDEO_QUALITY,
-            'outtmpl'           : output_path,
-            'writethumbnail'    : True,
-            'quiet'             : True,
-            'no_warnings'       : True,
-            'cookiefile'        : 'cookies.txt',
-            'geo_bypass'        : True,
-            'geo_bypass_country': 'US',
-            'postprocessors'    : [{
+            'format'         : VIDEO_QUALITY,
+            'outtmpl'        : output_path,
+            'writethumbnail' : True,
+            'quiet'          : True,
+            'no_warnings'    : True,
+            'cookiefile'     : 'cookies.txt',
+            'geo_bypass'     : True,
+            'extractor_args' : {
+                'youtube': {
+                    'player_client': ['android'],
+                }
+            },
+            'http_headers'   : {
+                'User-Agent': (
+                    'com.google.android.youtube/19.30.36'
+                    '(Linux; U; Android 11) gzip'
+                ),
+            },
+            'postprocessors' : [{
                 'key'           : 'FFmpegVideoConvertor',
-                'preferedformat': 'mp4'
+                'preferedformat': 'mp4',
             }],
         }
         return self._run_download(ydl_opts, video_url, video_id)
 
-    # ── Method 3: Cookies + Proxy ─────────
-    def _method_3_with_proxy(self, video_url, video_id):
+    # ─────────────────────────────────────────────
+    # Method 3: TV Client (Different IP Rules)
+    # ─────────────────────────────────────────────
+    def _method_3_tv_client(self, video_url, video_id):
+        output_path = os.path.join(DOWNLOADS_DIR, f"{video_id}.%(ext)s")
+        ydl_opts = {
+            'format'         : 'best[height<=720]/best',
+            'outtmpl'        : output_path,
+            'writethumbnail' : True,
+            'quiet'          : True,
+            'no_warnings'    : True,
+            'cookiefile'     : 'cookies.txt',
+            'geo_bypass'     : True,
+            'extractor_args' : {
+                'youtube': {
+                    'player_client': ['tv_embedded'],
+                }
+            },
+            'postprocessors' : [{
+                'key'           : 'FFmpegVideoConvertor',
+                'preferedformat': 'mp4',
+            }],
+        }
+        return self._run_download(ydl_opts, video_url, video_id)
+
+    # ─────────────────────────────────────────────
+    # Method 4: iOS Client + Working Proxy
+    # ─────────────────────────────────────────────
+    def _method_4_with_proxy(self, video_url, video_id):
         output_path = os.path.join(DOWNLOADS_DIR, f"{video_id}.%(ext)s")
 
         proxy = self.proxy_manager.get_working_proxy()
         if not proxy:
+            print("   ⚠️ No working proxy found")
             return None
 
         print(f"   🔀 Using proxy: {proxy}")
 
         ydl_opts = {
-            'format'            : VIDEO_QUALITY,
-            'outtmpl'           : output_path,
-            'writethumbnail'    : True,
-            'quiet'             : True,
-            'no_warnings'       : True,
-            'cookiefile'        : 'cookies.txt',
-            'geo_bypass'        : True,
-            'geo_bypass_country': 'US',
-            'proxy'             : proxy,
-            'postprocessors'    : [{
+            'format'         : VIDEO_QUALITY,
+            'outtmpl'        : output_path,
+            'writethumbnail' : True,
+            'quiet'          : True,
+            'no_warnings'    : True,
+            'cookiefile'     : 'cookies.txt',
+            'geo_bypass'     : True,
+            'proxy'          : proxy,
+            'extractor_args' : {
+                'youtube': {
+                    'player_client': ['ios', 'android'],
+                }
+            },
+            'postprocessors' : [{
                 'key'           : 'FFmpegVideoConvertor',
-                'preferedformat': 'mp4'
+                'preferedformat': 'mp4',
             }],
         }
         return self._run_download(ydl_opts, video_url, video_id)
 
-    # ── Method 4: Invidious ───────────────
-    def _method_4_invidious(self, video_url, video_id):
-        invidious_instances = [
-            "https://invidious.snopyta.org",
-            "https://invidious.kavin.rocks",
-            "https://vid.puffyan.us",
-            "https://invidious.namazso.eu",
-            "https://invidious.flokinet.to",
-            "https://yt.artemislena.eu",
-            "https://invidious.nerdvpn.de",
-        ]
-
+    # ─────────────────────────────────────────────
+    # Method 5: Cookies Only (Last Resort)
+    # ─────────────────────────────────────────────
+    def _method_5_cookies_only(self, video_url, video_id):
         output_path = os.path.join(DOWNLOADS_DIR, f"{video_id}.%(ext)s")
+        ydl_opts = {
+            'format'         : 'best[height<=480]/best',
+            'outtmpl'        : output_path,
+            'writethumbnail' : True,
+            'quiet'          : False,
+            'no_warnings'    : False,
+            'cookiefile'     : 'cookies.txt',
+            'geo_bypass'     : True,
+            'extractor_args' : {
+                'youtube': {
+                    'player_client': ['ios', 'android', 'tv_embedded'],
+                }
+            },
+            'postprocessors' : [{
+                'key'           : 'FFmpegVideoConvertor',
+                'preferedformat': 'mp4',
+            }],
+        }
+        return self._run_download(ydl_opts, video_url, video_id)
 
-        for instance in invidious_instances:
-            invidious_url = f"{instance}/watch?v={video_id}"
-            print(f"   🔄 Trying: {instance}")
-
-            ydl_opts = {
-                'format'        : 'best[height<=720]',
-                'outtmpl'       : output_path,
-                'quiet'         : True,
-                'no_warnings'   : True,
-                'cookiefile'    : 'cookies.txt',
-                'postprocessors': [{
-                    'key'           : 'FFmpegVideoConvertor',
-                    'preferedformat': 'mp4'
-                }],
-            }
-
-            result = self._run_download(ydl_opts, invidious_url, video_id)
-            if result:
-                if not result.get('thumbnail_file'):
-                    result['thumbnail_file'] = self._download_thumbnail(video_id)
-                return result
-
-            time.sleep(1)
-
-        return None
-
-    # ── Core Runner ───────────────────────
+    # ─────────────────────────────────────────────
+    # Core Runner
+    # ─────────────────────────────────────────────
     def _run_download(self, ydl_opts, video_url, video_id):
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(video_url, download=True)
+
+            if not info:
+                return None
 
             # Find video file
             video_file = None
@@ -158,6 +209,7 @@ class VideoDownloader:
                     video_file = path
                     break
 
+            # Search by video_id in filename
             if not video_file:
                 for f in os.listdir(DOWNLOADS_DIR):
                     if video_id in f and not f.endswith(
@@ -168,9 +220,6 @@ class VideoDownloader:
 
             if not video_file:
                 return None
-
-            # Get blocked countries
-            blocked = self._get_blocked_countries(info)
 
             # Find thumbnail
             thumb = None
@@ -190,20 +239,24 @@ class VideoDownloader:
                 "title"            : info.get('title', 'Unknown'),
                 "description"      : info.get('description', ''),
                 "channel"          : info.get('channel', 'Unknown'),
-                "blocked_countries": blocked,
+                "blocked_countries": self._get_blocked_countries(info),
             }
 
         except Exception:
             return None
 
-    # ── Get Blocked Countries ─────────────
+    # ─────────────────────────────────────────────
+    # Get Blocked Countries
+    # ─────────────────────────────────────────────
     def _get_blocked_countries(self, info):
         region = info.get('region_restriction', {})
         if region:
             return region.get('blocked', [])
         return []
 
-    # ── Download Thumbnail ────────────────
+    # ─────────────────────────────────────────────
+    # Download Thumbnail
+    # ─────────────────────────────────────────────
     def _download_thumbnail(self, video_id):
         urls = [
             f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg",
@@ -215,8 +268,8 @@ class VideoDownloader:
                 r = requests.get(url, timeout=10)
                 if r.status_code == 200 and len(r.content) > 1000:
                     path = os.path.join(DOWNLOADS_DIR, f"{video_id}.jpg")
-                    with open(path, "wb") as f:
-                        f.write(r.content)
+                    with open(path, "wb") as fh:
+                        fh.write(r.content)
                     return path
             except Exception:
                 continue
