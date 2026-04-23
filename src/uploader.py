@@ -20,34 +20,76 @@ class VideoUploader:
         self.thumb_editor      = ThumbnailEditor()
 
     # ─────────────────────────────────────────────
-    # Verify We Are On Correct Channel
+    # Verify Correct Channel
     # ─────────────────────────────────────────────
     def _verify_channel(self):
-        """Check which channel the token is linked to"""
         try:
             response = self.youtube.channels().list(
                 part = "snippet",
                 mine = True
             ).execute()
-
             items = response.get("items", [])
             if items:
                 for item in items:
                     ch_id   = item.get("id", "")
                     ch_name = item.get("snippet", {}).get("title", "")
-                    print(f"   📺 Token channel: {ch_name} ({ch_id})")
-
+                    print(f"   📺 Uploading to: {ch_name} ({ch_id})")
                     if ch_id == self.target_channel_id:
                         print(f"   ✅ Correct channel confirmed!")
                         return True
-
-                print(f"   ⚠️ Token is linked to different channel!")
-                print(f"   ⚠️ Target: {self.target_channel_id}")
+                print(f"   ⚠️ Channel mismatch!")
                 return False
-            return False
         except Exception as e:
             print(f"   ⚠️ Channel verify error: {e}")
             return False
+
+    # ─────────────────────────────────────────────
+    # Get Full Region Restriction from Source
+    # ─────────────────────────────────────────────
+    def _get_region_restriction(self, video_info):
+        """
+        Copy exact same region restriction as source video.
+        Returns (restriction_dict, description_string)
+        """
+        blocked_countries = video_info.get("blocked_countries", [])
+        allowed_countries = video_info.get("allowed_countries", [])
+
+        restriction  = {}
+        description  = "None"
+
+        if blocked_countries and len(blocked_countries) > 0:
+            # Source has BLOCKED countries list
+            # → Block same countries in our upload
+            restriction = {
+                "regionRestriction": {
+                    "blocked": blocked_countries
+                }
+            }
+            description = (
+                f"{len(blocked_countries)} countries blocked "
+                f"(same as source)"
+            )
+
+        elif allowed_countries and len(allowed_countries) > 0:
+            # Source has ALLOWED countries list
+            # → Allow only same countries in our upload
+            restriction = {
+                "regionRestriction": {
+                    "allowed": allowed_countries
+                }
+            }
+            description = (
+                f"Only {len(allowed_countries)} countries allowed "
+                f"(same as source)"
+            )
+
+        else:
+            # No restriction on source
+            # → No restriction on our upload
+            restriction  = {}
+            description  = "No restriction (available worldwide)"
+
+        return restriction, description
 
     # ─────────────────────────────────────────────
     # Main Upload Function
@@ -66,16 +108,15 @@ class VideoUploader:
             video_info.get("description", "")
         )
 
-        blocked_countries = video_info.get("blocked_countries", [])
+        # ── Get exact region restriction ───────────
+        region_restriction, region_desc = self._get_region_restriction(
+            video_info
+        )
 
         print(f"\n📤 Uploading to YouTube")
         print(f"   Target  : {self.target_channel_id}")
         print(f"   Title   : {new_title}")
-
-        if blocked_countries:
-            print(f"   Blocking: {len(blocked_countries)} countries")
-        else:
-            print(f"   Blocking: None")
+        print(f"   Region  : {region_desc}")
 
         # ── Verify correct channel ─────────────────
         print(f"\n🔍 Verifying channel...")
@@ -102,15 +143,10 @@ class VideoUploader:
             }
         }
 
+        # ── Add region restriction if exists ───────
         part = "snippet,status"
-
-        # ── Add country restrictions ───────────────
-        if blocked_countries:
-            body["contentDetails"] = {
-                "regionRestriction": {
-                    "blocked": blocked_countries
-                }
-            }
+        if region_restriction:
+            body["contentDetails"] = region_restriction
             part = "snippet,status,contentDetails"
 
         # ── Upload video ───────────────────────────
@@ -128,42 +164,35 @@ class VideoUploader:
             ).execute()
 
             uploaded_id = response.get("id")
-            print(f"✅ Uploaded! ID: {uploaded_id}")
+            print(f"\n✅ Uploaded! ID: {uploaded_id}")
             print(f"🔗 https://youtu.be/{uploaded_id}")
 
-            # ── Move to correct channel if needed ──
-            if self.target_channel_id:
-                try:
-                    # Check if uploaded to correct channel
-                    vid_response = self.youtube.videos().list(
-                        part = "snippet",
-                        id   = uploaded_id
-                    ).execute()
-
-                    vid_items = vid_response.get("items", [])
-                    if vid_items:
-                        actual_channel = vid_items[0].get(
-                            "snippet", {}
-                        ).get("channelId", "")
-
-                        print(f"   📺 Uploaded to channel: {actual_channel}")
-
-                        if actual_channel != self.target_channel_id:
-                            print(f"   ⚠️ Wrong channel detected!")
-                            print(f"   ⚠️ Expected : {self.target_channel_id}")
-                            print(f"   ⚠️ Got      : {actual_channel}")
-                        else:
-                            print(f"   ✅ Correct channel confirmed!")
-
-                except Exception as e:
-                    print(f"   ⚠️ Channel check error: {e}")
+            # ── Verify upload channel ──────────────
+            try:
+                vid_response = self.youtube.videos().list(
+                    part = "snippet",
+                    id   = uploaded_id
+                ).execute()
+                vid_items = vid_response.get("items", [])
+                if vid_items:
+                    actual_channel = vid_items[0].get(
+                        "snippet", {}
+                    ).get("channelId", "")
+                    if actual_channel == self.target_channel_id:
+                        print(f"✅ Uploaded to correct channel!")
+                    else:
+                        print(f"⚠️ Wrong channel!")
+                        print(f"   Expected : {self.target_channel_id}")
+                        print(f"   Got      : {actual_channel}")
+            except Exception:
+                pass
 
             # ── Set thumbnail ──────────────────────
             thumb = video_info.get("thumbnail_file")
             if thumb and os.path.exists(thumb):
                 modified = self.thumb_editor.modify_thumbnail(thumb)
                 target   = modified if modified else thumb
-                if os.path.exists(target):
+                if target and os.path.exists(target):
                     try:
                         self.youtube.thumbnails().set(
                             videoId    = uploaded_id,
@@ -178,9 +207,10 @@ class VideoUploader:
 
             # ── Save to database ───────────────────
             self.db.mark_video_uploaded(video_id, {
-                "title"     : new_title,
-                "channel_id": self.target_channel_id,
-                "youtube_id": uploaded_id,
+                "title"             : new_title,
+                "channel_id"        : self.target_channel_id,
+                "youtube_id"        : uploaded_id,
+                "region_restriction": region_desc,
             })
 
             return {
