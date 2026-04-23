@@ -45,79 +45,14 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y ffmpeg
 
-      # ── Step 4: Setup Windscribe VPN ───────────────────
-      - name: Setup Windscribe VPN
-        run: |
-          echo "🌐 Installing Windscribe VPN..."
-
-          # Download and Install
-          wget -q "https://windscribe.com/install/desktop/linux_deb_x64" \
-            -O windscribe.deb
-          sudo dpkg -i windscribe.deb 2>/dev/null || true
-          sudo apt-get install -f -y 2>/dev/null || true
-
-          # Correct binary path
-          WINDSCRIBE="/opt/windscribe/windscribe-cli"
-
-          # Start helper service
-          echo "🚀 Starting Windscribe helper service..."
-          sudo systemctl start windscribe-helper 2>/dev/null || true
-          sleep 5
-
-          # Check binary exists
-          if [ ! -f "$WINDSCRIBE" ]; then
-            echo "❌ windscribe-cli not found at $WINDSCRIBE"
-            exit 1
-          fi
-
-          echo "✅ windscribe-cli found!"
-
-          # Login
-          echo "🔐 Logging into Windscribe..."
-          sudo "$WINDSCRIBE" login \
-            ${{ secrets.WINDSCRIBE_USERNAME }} \
-            ${{ secrets.WINDSCRIBE_PASSWORD }}
-
-          sleep 3
-
-          # Connect to India
-          echo "🔌 Connecting to India server..."
-          sudo "$WINDSCRIBE" connect India
-
-          echo "⏳ Waiting 20 seconds for VPN to stabilize..."
-          sleep 20
-
-          # Status check
-          echo ""
-          echo "✅ VPN Status:"
-          sudo "$WINDSCRIBE" status || true
-
-          # Location check
-          echo ""
-          echo "🌍 Current IP and Location:"
-          curl -s https://ipapi.co/json/ | python3 -c "
-          import sys, json
-          try:
-              d = json.load(sys.stdin)
-              print(f'  IP      : {d[\"ip\"]}')
-              print(f'  Country : {d[\"country_name\"]}')
-              print(f'  City    : {d[\"city\"]}')
-              if d['country_name'] == 'India':
-                  print('  ✅ SUCCESS - Connected to India!')
-              else:
-                  print('  ⚠️ WARNING - Not India, trying again...')
-          except Exception as e:
-              print(f'  Error: {e}')
-          " || true
-
-      # ── Step 5: Install Dependencies ──────────────────
+      # ── Step 4: Install Dependencies ──────────────────
       - name: Install Dependencies
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
           pip install -U yt-dlp
 
-      # ── Step 6: Restore Database ───────────────────────
+      # ── Step 5: Restore Database ───────────────────────
       - name: Restore Database
         uses: actions/cache@v4
         with:
@@ -125,14 +60,14 @@ jobs:
           key: db-v1
           restore-keys: db-v1
 
-      # ── Step 7: Create Credentials ────────────────────
+      # ── Step 6: Create Credentials ────────────────────
       - name: Create Credentials
         run: |
           echo '${{ secrets.CLIENT_SECRETS }}' > client_secrets.json
           echo '${{ secrets.YOUTUBE_TOKEN }}'  > token.json
           printf '%s' '${{ secrets.COOKIES_TXT }}' > cookies.txt
 
-      # ── Step 8: Verify Files ───────────────────────────
+      # ── Step 7: Verify Files ───────────────────────────
       - name: Verify Files
         run: |
           echo "📁 Checking credential files..."
@@ -152,6 +87,61 @@ jobs:
           else
             echo "❌ token.json NOT found!"
           fi
+
+      # ── Step 8: Test BD/IN Proxies ────────────────────
+      - name: Test BD/IN Proxies
+        run: |
+          echo "🔄 Testing BD/IN proxies from proxifly..."
+          python3 - <<'EOF'
+          import requests
+          import random
+
+          sources = {
+              "BD": "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/countries/BD/data.txt",
+              "IN": "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/countries/IN/data.txt",
+          }
+
+          all_proxies = []
+          for country, url in sources.items():
+              try:
+                  r = requests.get(url, timeout=15)
+                  if r.status_code == 200:
+                      lines = [l.strip() for l in r.text.splitlines()
+                               if l.strip() and not l.startswith('#')]
+                      print(f"   ✅ {country}: {len(lines)} proxies loaded")
+                      all_proxies.extend(lines)
+                  else:
+                      print(f"   ❌ {country}: HTTP {r.status_code}")
+              except Exception as e:
+                  print(f"   ❌ {country}: {e}")
+
+          print(f"\n   📦 Total proxies: {len(all_proxies)}")
+
+          # Test first 5 proxies
+          print("\n   🔍 Testing sample proxies...")
+          random.shuffle(all_proxies)
+          working = 0
+
+          for proxy in all_proxies[:10]:
+              if not proxy.startswith('http'):
+                  proxy = f"http://{proxy}"
+              try:
+                  r = requests.get(
+                      "https://www.youtube.com",
+                      proxies={"http": proxy, "https": proxy},
+                      timeout=8,
+                      headers={"User-Agent": "Mozilla/5.0"}
+                  )
+                  if r.status_code in (200, 403):
+                      print(f"   ✅ Working: {proxy}")
+                      working += 1
+                      if working >= 3:
+                          break
+              except:
+                  pass
+
+          print(f"\n   🎯 Found {working} working proxies in test")
+          EOF
 
       # ── Step 9: Set Video Variables ───────────────────
       - name: Set Video Variables
@@ -184,27 +174,13 @@ jobs:
         run: |
           echo "📦 yt-dlp version: $(yt-dlp --version)"
 
-      # ── Step 12: Test Video Access ─────────────────────
-      - name: Test Video Access
-        run: |
-          echo "🧪 Testing video access through VPN..."
-          yt-dlp \
-            --extractor-args "youtube:player_client=ios,android" \
-            --geo-bypass \
-            --cookies cookies.txt \
-            --skip-download \
-            --print title \
-            "${{ env.VIDEO_URL }}" \
-            && echo "✅ Video is accessible!" \
-            || echo "⚠️ Test failed - will still try in main script"
-
-      # ── Step 13: Run Automation ────────────────────────
+      # ── Step 12: Run Automation ────────────────────────
       - name: Run Automation
         run: python main.py run
         env:
           VIDEO_PRIVACY: ${{ env.VIDEO_PRIVACY }}
 
-      # ── Step 14: Save Database ─────────────────────────
+      # ── Step 13: Save Database ─────────────────────────
       - name: Save Database
         if: always()
         run: |
