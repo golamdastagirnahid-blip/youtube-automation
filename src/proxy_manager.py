@@ -1,66 +1,86 @@
+"""
+Proxy Manager
+Fetches fresh BD/IN proxies from proxifly repo
+"""
+
 import requests
 import random
-import time
-from src.config import DOWNLOADS_DIR
 
 
 class ProxyManager:
+
     def __init__(self):
-        self.proxy_sources = {
-            "BD": "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/countries/BD.txt",
-            "IN": "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/countries/IN.txt",
+        self.proxies = []
+        self.sources = {
+            "BD": "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/countries/BD/data.txt",
+            "IN": "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/countries/IN/data.txt",
         }
-        self.working_proxies = []
 
     def get_fresh_proxies(self):
-        """Fetch latest proxies from proxifly repo"""
+        """Fetch latest proxies from BD and IN"""
         all_proxies = []
-        print("🔄 Fetching fresh proxies from Bangladesh & India...")
+        print("🔄 Fetching fresh proxies...")
 
-        for country, url in self.proxy_sources.items():
+        for country, url in self.sources.items():
             try:
                 r = requests.get(url, timeout=15)
                 if r.status_code == 200:
-                    proxies = [line.strip() for line in r.text.splitlines() 
-                              if line.strip() and not line.startswith('#')]
-                    all_proxies.extend([f"http://{proxy}" for proxy in proxies])
-                    print(f"   Found {len(proxies)} {country} proxies")
+                    lines = [
+                        line.strip()
+                        for line in r.text.splitlines()
+                        if line.strip() and not line.startswith('#')
+                    ]
+                    for line in lines:
+                        if line.startswith("http") or line.startswith("socks"):
+                            all_proxies.append(line)
+                        else:
+                            all_proxies.append(f"http://{line}")
+
+                    print(f"   {country}: {len(lines)} proxies")
             except Exception as e:
-                print(f"   Failed to fetch {country} proxies: {e}")
+                print(f"   {country} failed: {e}")
 
         random.shuffle(all_proxies)
-        self.working_proxies = all_proxies
-        print(f"✅ Total fresh proxies loaded: {len(all_proxies)}")
+        self.proxies = all_proxies
+        print(f"   Total: {len(all_proxies)} proxies")
         return all_proxies
 
     def test_proxy(self, proxy, timeout=8):
         """Test if proxy works"""
         try:
-            proxies = {"http": proxy, "https": proxy}
-            r = requests.get("https://www.youtube.com", proxies=proxies, timeout=timeout)
-            return r.status_code in (200, 403)  # 403 is acceptable for YouTube
-        except:
+            r = requests.get(
+                "https://www.youtube.com",
+                proxies={"http": proxy, "https": proxy},
+                timeout=timeout,
+                headers={"User-Agent": "Mozilla/5.0"}
+            )
+            return r.status_code in (200, 403)
+        except Exception:
             return False
 
     def get_working_proxy(self):
-        """Return a working proxy from BD/IN"""
-        if not self.working_proxies:
+        """Get a working proxy"""
+        if not self.proxies:
             self.get_fresh_proxies()
 
-        # Try up to 15 proxies
-        for _ in range(15):
-            if not self.working_proxies:
-                self.get_fresh_proxies()
-            
-            proxy = random.choice(self.working_proxies)
-            print(f"   🔍 Testing proxy: {proxy}")
+        tested   = 0
+        max_test = min(15, len(self.proxies))
+
+        for proxy in list(self.proxies[:max_test]):
+            tested += 1
+            print(f"   🔍 Testing [{tested}/{max_test}]: {proxy}")
 
             if self.test_proxy(proxy):
-                print(f"   ✅ Working proxy found: {proxy}")
+                print(f"   ✅ Working proxy: {proxy}")
                 return proxy
             else:
-                if proxy in self.working_proxies:
-                    self.working_proxies.remove(proxy)
+                if proxy in self.proxies:
+                    self.proxies.remove(proxy)
 
-        print("⚠️ No working proxy found after testing")
+        # If all failed return random one
+        if self.proxies:
+            proxy = random.choice(self.proxies)
+            print(f"   🎲 Using random: {proxy}")
+            return proxy
+
         return None
