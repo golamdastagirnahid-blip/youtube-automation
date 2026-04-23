@@ -17,27 +17,42 @@ on:
         description: 'Video Title'
         required: false
         default: 'Test Video'
+      video_privacy:
+        description: 'Video Privacy (public/private/unlisted)'
+        required: false
+        default: 'public'
 
 jobs:
   upload:
     runs-on: ubuntu-latest
-    timeout-minutes: 18
+    timeout-minutes: 30
 
     steps:
+
+      # ── Step 1: Checkout Code ──────────────────────────
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # ── Step 2: Setup Python ───────────────────────────
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
+      # ── Step 3: Install FFmpeg ─────────────────────────
       - name: Install FFmpeg
-        run: sudo apt-get install -y ffmpeg
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y ffmpeg
 
+      # ── Step 4: Install Dependencies ──────────────────
       - name: Install Dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -U yt-dlp
 
+      # ── Step 5: Restore Database ───────────────────────
       - name: Restore Database
         uses: actions/cache@v4
         with:
@@ -45,34 +60,77 @@ jobs:
           key: db-v1
           restore-keys: db-v1
 
+      # ── Step 6: Create Credentials ────────────────────
       - name: Create Credentials
         run: |
           echo '${{ secrets.CLIENT_SECRETS }}' > client_secrets.json
           echo '${{ secrets.YOUTUBE_TOKEN }}'  > token.json
           printf '%s' '${{ secrets.COOKIES_TXT }}' > cookies.txt
 
+      # ── Step 7: Verify Credentials Exist ──────────────
+      - name: Verify Credentials
+        run: |
+          echo "📁 Checking files..."
+          if [ -f "cookies.txt" ]; then
+            echo "✅ cookies.txt found ($(wc -c < cookies.txt) bytes)"
+          else
+            echo "❌ cookies.txt NOT found"
+          fi
+          if [ -f "client_secrets.json" ]; then
+            echo "✅ client_secrets.json found"
+          else
+            echo "❌ client_secrets.json NOT found"
+          fi
+          if [ -f "token.json" ]; then
+            echo "✅ token.json found"
+          else
+            echo "❌ token.json NOT found"
+          fi
+
+      # ── Step 8: Set Video Variables ───────────────────
       - name: Set Video Variables
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "VIDEO_ID=${{ github.event.inputs.video_id }}"       >> $GITHUB_ENV
-            echo "VIDEO_URL=${{ github.event.inputs.video_url }}"     >> $GITHUB_ENV
-            echo "VIDEO_TITLE=${{ github.event.inputs.video_title }}" >> $GITHUB_ENV
+            echo "VIDEO_ID=${{ github.event.inputs.video_id }}"           >> $GITHUB_ENV
+            echo "VIDEO_URL=${{ github.event.inputs.video_url }}"         >> $GITHUB_ENV
+            echo "VIDEO_TITLE=${{ github.event.inputs.video_title }}"     >> $GITHUB_ENV
+            echo "VIDEO_PRIVACY=${{ github.event.inputs.video_privacy }}" >> $GITHUB_ENV
           else
-            echo "VIDEO_ID=${{ github.event.client_payload.video_id }}"       >> $GITHUB_ENV
-            echo "VIDEO_URL=${{ github.event.client_payload.video_url }}"     >> $GITHUB_ENV
-            echo "VIDEO_TITLE=${{ github.event.client_payload.video_title }}" >> $GITHUB_ENV
+            echo "VIDEO_ID=${{ github.event.client_payload.video_id }}"           >> $GITHUB_ENV
+            echo "VIDEO_URL=${{ github.event.client_payload.video_url }}"         >> $GITHUB_ENV
+            echo "VIDEO_TITLE=${{ github.event.client_payload.video_title }}"     >> $GITHUB_ENV
+            echo "VIDEO_PRIVACY=${{ github.event.client_payload.video_privacy }}" >> $GITHUB_ENV
           fi
 
+      # ── Step 9: Show Video Info ────────────────────────
+      - name: Show Video Info
+        run: |
+          echo "============================================"
+          echo "🎬 Video Information"
+          echo "   ID    : ${{ env.VIDEO_ID }}"
+          echo "   URL   : ${{ env.VIDEO_URL }}"
+          echo "   Title : ${{ env.VIDEO_TITLE }}"
+          echo "   Privacy: ${{ env.VIDEO_PRIVACY }}"
+          echo "============================================"
+
+      # ── Step 10: Check yt-dlp Version ─────────────────
+      - name: Check yt-dlp Version
+        run: |
+          echo "📦 yt-dlp version:"
+          yt-dlp --version
+
+      # ── Step 11: Run Automation ────────────────────────
       - name: Run Automation
         run: python main.py run
         env:
-          VIDEO_PRIVACY: public
+          VIDEO_PRIVACY: ${{ env.VIDEO_PRIVACY }}
 
+      # ── Step 12: Save Database ─────────────────────────
       - name: Save Database
         if: always()
         run: |
           git config user.name  "automation-bot"
           git config user.email "bot@github.com"
           git add database.json || true
-          git diff --staged --quiet || git commit -m "Update DB"
+          git diff --staged --quiet || git commit -m "Update DB [skip ci]"
           git push || true
