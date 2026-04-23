@@ -45,14 +45,45 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y ffmpeg
 
-      # ── Step 4: Install Dependencies ──────────────────
+      # ── Step 4: Setup Cloudflare WARP VPN ─────────────
+      - name: Setup Cloudflare WARP
+        run: |
+          echo "🌐 Installing Cloudflare WARP..."
+          curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg \
+            | sudo gpg --dearmor \
+            -o /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+
+          echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] \
+            https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" \
+            | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
+
+          sudo apt-get update -y
+          sudo apt-get install -y cloudflare-warp
+
+          echo "📝 Registering WARP..."
+          warp-cli --accept-tos registration new
+
+          echo "🔌 Connecting WARP..."
+          warp-cli --accept-tos connect
+
+          echo "⏳ Waiting for connection..."
+          sleep 10
+
+          echo "✅ Checking IP after WARP:"
+          curl -s https://ifconfig.me || echo "IP check failed"
+
+          echo ""
+          echo "🔍 WARP Status:"
+          warp-cli --accept-tos status || true
+
+      # ── Step 5: Install Dependencies ──────────────────
       - name: Install Dependencies
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
           pip install -U yt-dlp
 
-      # ── Step 5: Restore Database ───────────────────────
+      # ── Step 6: Restore Database ───────────────────────
       - name: Restore Database
         uses: actions/cache@v4
         with:
@@ -60,14 +91,14 @@ jobs:
           key: db-v1
           restore-keys: db-v1
 
-      # ── Step 6: Create Credentials ────────────────────
+      # ── Step 7: Create Credentials ────────────────────
       - name: Create Credentials
         run: |
           echo '${{ secrets.CLIENT_SECRETS }}' > client_secrets.json
           echo '${{ secrets.YOUTUBE_TOKEN }}'  > token.json
           printf '%s' '${{ secrets.COOKIES_TXT }}' > cookies.txt
 
-      # ── Step 7: Verify Credentials Exist ──────────────
+      # ── Step 8: Verify Credentials ────────────────────
       - name: Verify Credentials
         run: |
           echo "📁 Checking files..."
@@ -87,7 +118,7 @@ jobs:
             echo "❌ token.json NOT found"
           fi
 
-      # ── Step 8: Set Video Variables ───────────────────
+      # ── Step 9: Set Video Variables ───────────────────
       - name: Set Video Variables
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -102,30 +133,44 @@ jobs:
             echo "VIDEO_PRIVACY=${{ github.event.client_payload.video_privacy }}" >> $GITHUB_ENV
           fi
 
-      # ── Step 9: Show Video Info ────────────────────────
+      # ── Step 10: Show Video Info ───────────────────────
       - name: Show Video Info
         run: |
           echo "============================================"
           echo "🎬 Video Information"
-          echo "   ID    : ${{ env.VIDEO_ID }}"
-          echo "   URL   : ${{ env.VIDEO_URL }}"
-          echo "   Title : ${{ env.VIDEO_TITLE }}"
+          echo "   ID     : ${{ env.VIDEO_ID }}"
+          echo "   URL    : ${{ env.VIDEO_URL }}"
+          echo "   Title  : ${{ env.VIDEO_TITLE }}"
           echo "   Privacy: ${{ env.VIDEO_PRIVACY }}"
           echo "============================================"
 
-      # ── Step 10: Check yt-dlp Version ─────────────────
+      # ── Step 11: Check yt-dlp Version ─────────────────
       - name: Check yt-dlp Version
         run: |
           echo "📦 yt-dlp version:"
           yt-dlp --version
 
-      # ── Step 11: Run Automation ────────────────────────
+      # ── Step 12: Test Download With WARP ──────────────
+      - name: Test yt-dlp With WARP
+        run: |
+          echo "🧪 Testing yt-dlp geo access..."
+          yt-dlp \
+            --extractor-args "youtube:player_client=ios,android" \
+            --geo-bypass \
+            --cookies cookies.txt \
+            --skip-download \
+            --print title \
+            "${{ env.VIDEO_URL }}" \
+            && echo "✅ Video is accessible!" \
+            || echo "⚠️ Video test failed - will try in main script"
+
+      # ── Step 13: Run Automation ────────────────────────
       - name: Run Automation
         run: python main.py run
         env:
           VIDEO_PRIVACY: ${{ env.VIDEO_PRIVACY }}
 
-      # ── Step 12: Save Database ─────────────────────────
+      # ── Step 14: Save Database ─────────────────────────
       - name: Save Database
         if: always()
         run: |
