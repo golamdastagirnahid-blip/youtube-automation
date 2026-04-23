@@ -45,36 +45,37 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y ffmpeg
 
-      # ── Step 4: Setup Cloudflare WARP VPN ─────────────
-      - name: Setup Cloudflare WARP
+      # ── Step 4: Setup Windscribe VPN ───────────────────
+      - name: Setup Windscribe VPN
         run: |
-          echo "🌐 Installing Cloudflare WARP..."
-          curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg \
-            | sudo gpg --dearmor \
-            -o /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+          echo "🌐 Installing Windscribe VPN..."
+          wget -q "https://windscribe.com/install/desktop/linux_deb_x64" \
+            -O windscribe.deb
+          sudo dpkg -i windscribe.deb 2>/dev/null || true
+          sudo apt-get install -f -y 2>/dev/null || true
 
-          echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] \
-            https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" \
-            | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
+          echo "🔐 Logging into Windscribe..."
+          windscribe login \
+            ${{ secrets.WINDSCRIBE_USERNAME }} \
+            ${{ secrets.WINDSCRIBE_PASSWORD }}
 
-          sudo apt-get update -y
-          sudo apt-get install -y cloudflare-warp
+          echo "🔌 Connecting to India server..."
+          windscribe connect India || windscribe connect Best
 
-          echo "📝 Registering WARP..."
-          warp-cli --accept-tos registration new
-
-          echo "🔌 Connecting WARP..."
-          warp-cli --accept-tos connect
-
-          echo "⏳ Waiting for connection..."
-          sleep 10
-
-          echo "✅ Checking IP after WARP:"
-          curl -s https://ifconfig.me || echo "IP check failed"
+          echo "⏳ Waiting 15 seconds for connection..."
+          sleep 15
 
           echo ""
-          echo "🔍 WARP Status:"
-          warp-cli --accept-tos status || true
+          echo "✅ VPN Connected — Current IP:"
+          curl -s https://ifconfig.me
+
+          echo ""
+          echo "🌍 Location Check:"
+          curl -s https://ipapi.co/json/ | python3 -c \
+            "import sys,json
+          d=json.load(sys.stdin)
+          print(f'  Country : {d[\"country_name\"]}')
+          print(f'  IP      : {d[\"ip\"]}')" || true
 
       # ── Step 5: Install Dependencies ──────────────────
       - name: Install Dependencies
@@ -101,21 +102,25 @@ jobs:
       # ── Step 8: Verify Credentials ────────────────────
       - name: Verify Credentials
         run: |
-          echo "📁 Checking files..."
+          echo "📁 Checking credential files..."
           if [ -f "cookies.txt" ]; then
-            echo "✅ cookies.txt found ($(wc -c < cookies.txt) bytes)"
+            SIZE=$(wc -c < cookies.txt)
+            echo "✅ cookies.txt found ($SIZE bytes)"
+            if [ "$SIZE" -lt 100 ]; then
+              echo "⚠️ WARNING: cookies.txt is too small - may be invalid!"
+            fi
           else
-            echo "❌ cookies.txt NOT found"
+            echo "❌ cookies.txt NOT found!"
           fi
           if [ -f "client_secrets.json" ]; then
             echo "✅ client_secrets.json found"
           else
-            echo "❌ client_secrets.json NOT found"
+            echo "❌ client_secrets.json NOT found!"
           fi
           if [ -f "token.json" ]; then
             echo "✅ token.json found"
           else
-            echo "❌ token.json NOT found"
+            echo "❌ token.json NOT found!"
           fi
 
       # ── Step 9: Set Video Variables ───────────────────
@@ -147,13 +152,12 @@ jobs:
       # ── Step 11: Check yt-dlp Version ─────────────────
       - name: Check yt-dlp Version
         run: |
-          echo "📦 yt-dlp version:"
-          yt-dlp --version
+          echo "📦 yt-dlp version: $(yt-dlp --version)"
 
-      # ── Step 12: Test Download With WARP ──────────────
-      - name: Test yt-dlp With WARP
+      # ── Step 12: Test Video Access ─────────────────────
+      - name: Test Video Access
         run: |
-          echo "🧪 Testing yt-dlp geo access..."
+          echo "🧪 Testing video access through VPN..."
           yt-dlp \
             --extractor-args "youtube:player_client=ios,android" \
             --geo-bypass \
@@ -162,7 +166,7 @@ jobs:
             --print title \
             "${{ env.VIDEO_URL }}" \
             && echo "✅ Video is accessible!" \
-            || echo "⚠️ Video test failed - will try in main script"
+            || echo "⚠️ Test failed - will still try in main script"
 
       # ── Step 13: Run Automation ────────────────────────
       - name: Run Automation
