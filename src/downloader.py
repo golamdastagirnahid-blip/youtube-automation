@@ -44,17 +44,15 @@ class VideoDownloader:
                         if line.strip() and not line.startswith('#')
                     ]
                     for line in lines:
-                        # Handle both formats:
-                        # socks5://1.2.3.4:1080
-                        # 1.2.3.4:1080
-                        if line.startswith("http") or line.startswith("socks"):
+                        if line.startswith("http") or \
+                           line.startswith("socks"):
                             all_proxies.append(line)
                         else:
                             all_proxies.append(f"http://{line}")
 
                     print(f"   ✅ {country}: {len(lines)} proxies loaded")
                 else:
-                    print(f"   ⚠️ {country}: Failed to fetch (status {r.status_code})")
+                    print(f"   ⚠️ {country}: Failed (status {r.status_code})")
             except Exception as e:
                 print(f"   ⚠️ {country}: Error - {e}")
 
@@ -72,9 +70,9 @@ class VideoDownloader:
             proxies = {"http": proxy, "https": proxy}
             r = requests.get(
                 "https://www.youtube.com",
-                proxies=proxies,
-                timeout=timeout,
-                headers={"User-Agent": "Mozilla/5.0"}
+                proxies = proxies,
+                timeout = timeout,
+                headers = {"User-Agent": "Mozilla/5.0"}
             )
             return r.status_code in (200, 403)
         except Exception:
@@ -86,7 +84,6 @@ class VideoDownloader:
     def get_best_proxy(self):
         """Find a working proxy from BD/IN list"""
 
-        # Load proxies if empty
         if not self.bd_in_proxies:
             self.load_proxies()
 
@@ -94,9 +91,8 @@ class VideoDownloader:
             print("   ❌ No proxies available")
             return None
 
-        print(f"   🔍 Testing proxies (pool size: {len(self.bd_in_proxies)})...")
+        print(f"   🔍 Testing proxies (pool: {len(self.bd_in_proxies)})...")
 
-        # Test up to 20 proxies
         tested   = 0
         max_test = min(20, len(self.bd_in_proxies))
 
@@ -110,12 +106,11 @@ class VideoDownloader:
                 print(f"   ✅ Working proxy: {proxy}")
                 return proxy
             else:
-                # Remove dead proxy
                 if proxy in self.bd_in_proxies:
                     self.bd_in_proxies.remove(proxy)
 
-        # Reload and try again if all failed
-        print("   🔄 All tested proxies failed — reloading...")
+        # Reload and use random if all failed
+        print("   🔄 Reloading proxies...")
         self.load_proxies()
 
         if self.bd_in_proxies:
@@ -238,19 +233,15 @@ class VideoDownloader:
         return self._run_download(ydl_opts, video_url, video_id)
 
     # ─────────────────────────────────────────────────────
-    # Method 3: Rotate Multiple Proxies + iOS
+    # Method 3: Rotate Multiple Proxies
     # ─────────────────────────────────────────────────────
     def _method_3_proxy_rotate(self, video_url, video_id):
         """Try multiple different proxies one by one"""
         output_path = os.path.join(DOWNLOADS_DIR, f"{video_id}.%(ext)s")
 
-        # Get up to 5 different proxies to try
-        proxies_to_try = []
         pool = list(self.bd_in_proxies)
         random.shuffle(pool)
-
-        for proxy in pool[:5]:
-            proxies_to_try.append(proxy)
+        proxies_to_try = pool[:5]
 
         if not proxies_to_try:
             return None
@@ -362,14 +353,18 @@ class VideoDownloader:
         print(f"   🔥 All clients combined (last resort)")
         output_path = os.path.join(DOWNLOADS_DIR, f"{video_id}.%(ext)s")
 
-        # Try with a random proxy from pool
         proxy = None
         if self.bd_in_proxies:
             proxy = random.choice(self.bd_in_proxies)
             print(f"   🔀 Random proxy: {proxy}")
 
         ydl_opts = {
-            'format'         : 'best[height<=720]/best',
+            'format'         : (
+                "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]"
+                "/bestvideo[height<=1080]+bestaudio"
+                "/best[height<=1080]"
+                "/best"
+            ),
             'outtmpl'        : output_path,
             'writethumbnail' : True,
             'quiet'          : False,
@@ -389,7 +384,6 @@ class VideoDownloader:
             }],
         }
 
-        # Add proxy if available
         if proxy:
             ydl_opts['proxy'] = proxy
 
@@ -411,14 +405,12 @@ class VideoDownloader:
             # ── Find Video File ───────────────────────────
             video_file = None
 
-            # Check common extensions
             for ext in ['mp4', 'mkv', 'webm', 'avi', 'mov']:
                 path = os.path.join(DOWNLOADS_DIR, f"{video_id}.{ext}")
                 if os.path.exists(path):
                     video_file = path
                     break
 
-            # Search by video_id in filename
             if not video_file:
                 for f in os.listdir(DOWNLOADS_DIR):
                     if video_id in f and not f.endswith(
@@ -441,9 +433,16 @@ class VideoDownloader:
                     thumb = path
                     break
 
-            # Download thumbnail if not found
             if not thumb:
                 thumb = self._download_thumbnail(video_id)
+
+            # ── Get Region Restriction ────────────────────
+            blocked = self._get_blocked_countries(info)
+            allowed = self._get_allowed_countries(info)
+
+            print(f"   🌍 Region info:")
+            print(f"      Blocked : {len(blocked)} countries")
+            print(f"      Allowed : {len(allowed)} countries")
 
             return {
                 "video_id"         : video_id,
@@ -452,7 +451,8 @@ class VideoDownloader:
                 "title"            : info.get('title',       'Unknown'),
                 "description"      : info.get('description', ''),
                 "channel"          : info.get('channel',     'Unknown'),
-                "blocked_countries": self._get_blocked_countries(info),
+                "blocked_countries": blocked,
+                "allowed_countries": allowed,
             }
 
         except Exception as e:
@@ -460,13 +460,25 @@ class VideoDownloader:
             return None
 
     # ─────────────────────────────────────────────────────
-    # Get Blocked Countries from Video Info
+    # Get Blocked Countries
     # ─────────────────────────────────────────────────────
     def _get_blocked_countries(self, info):
         try:
             region = info.get('region_restriction', {})
             if region:
                 return region.get('blocked', [])
+        except Exception:
+            pass
+        return []
+
+    # ─────────────────────────────────────────────────────
+    # Get Allowed Countries
+    # ─────────────────────────────────────────────────────
+    def _get_allowed_countries(self, info):
+        try:
+            region = info.get('region_restriction', {})
+            if region:
+                return region.get('allowed', [])
         except Exception:
             pass
         return []
