@@ -49,6 +49,7 @@ jobs:
         run: |
           echo '${{ secrets.CLIENT_SECRETS }}' > client_secrets.json
           echo '${{ secrets.YOUTUBE_TOKEN }}'  > token.json
+          printf '%s' '${{ secrets.COOKIES_TXT }}' > cookies.txt
 
       - name: Set Video Variables
         run: |

@@ -6,11 +6,10 @@ Multiple download methods with automatic fallback
 import os
 import time
 import random
-import subprocess
 import requests
 import yt_dlp
-from src.config   import DOWNLOADS_DIR, VIDEO_QUALITY
-from src.database import Database
+from src.config        import DOWNLOADS_DIR, VIDEO_QUALITY
+from src.database      import Database
 from src.proxy_manager import ProxyManager
 
 
@@ -23,10 +22,9 @@ class VideoDownloader:
     def download_video(self, video_url, video_id):
         print(f"📥 Downloading: {video_id}")
 
-        # Try multiple methods
         methods = [
-            self._method_1_direct,
-            self._method_2_geo_bypass,
+            self._method_1_cookies,
+            self._method_2_cookies_geo_bypass,
             self._method_3_with_proxy,
             self._method_4_invidious,
         ]
@@ -43,15 +41,16 @@ class VideoDownloader:
         print("❌ All download methods failed")
         return None
 
-    # ── Method 1: Direct Download ─────────
-    def _method_1_direct(self, video_url, video_id):
+    # ── Method 1: Cookies Only ────────────
+    def _method_1_cookies(self, video_url, video_id):
         output_path = os.path.join(DOWNLOADS_DIR, f"{video_id}.%(ext)s")
         ydl_opts = {
-            'format'       : VIDEO_QUALITY,
-            'outtmpl'      : output_path,
+            'format'        : VIDEO_QUALITY,
+            'outtmpl'       : output_path,
             'writethumbnail': True,
-            'quiet'        : True,
-            'no_warnings'  : True,
+            'quiet'         : True,
+            'no_warnings'   : True,
+            'cookiefile'    : 'cookies.txt',
             'postprocessors': [{
                 'key'           : 'FFmpegVideoConvertor',
                 'preferedformat': 'mp4'
@@ -59,8 +58,8 @@ class VideoDownloader:
         }
         return self._run_download(ydl_opts, video_url, video_id)
 
-    # ── Method 2: Geo Bypass ──────────────
-    def _method_2_geo_bypass(self, video_url, video_id):
+    # ── Method 2: Cookies + Geo Bypass ───
+    def _method_2_cookies_geo_bypass(self, video_url, video_id):
         output_path = os.path.join(DOWNLOADS_DIR, f"{video_id}.%(ext)s")
         ydl_opts = {
             'format'            : VIDEO_QUALITY,
@@ -68,6 +67,7 @@ class VideoDownloader:
             'writethumbnail'    : True,
             'quiet'             : True,
             'no_warnings'       : True,
+            'cookiefile'        : 'cookies.txt',
             'geo_bypass'        : True,
             'geo_bypass_country': 'US',
             'postprocessors'    : [{
@@ -77,11 +77,10 @@ class VideoDownloader:
         }
         return self._run_download(ydl_opts, video_url, video_id)
 
-    # ── Method 3: With Proxy ──────────────
+    # ── Method 3: Cookies + Proxy ─────────
     def _method_3_with_proxy(self, video_url, video_id):
         output_path = os.path.join(DOWNLOADS_DIR, f"{video_id}.%(ext)s")
 
-        # Get working proxy
         proxy = self.proxy_manager.get_working_proxy()
         if not proxy:
             return None
@@ -94,6 +93,7 @@ class VideoDownloader:
             'writethumbnail'    : True,
             'quiet'             : True,
             'no_warnings'       : True,
+            'cookiefile'        : 'cookies.txt',
             'geo_bypass'        : True,
             'geo_bypass_country': 'US',
             'proxy'             : proxy,
@@ -104,13 +104,8 @@ class VideoDownloader:
         }
         return self._run_download(ydl_opts, video_url, video_id)
 
-    # ── Method 4: Via Invidious ───────────
+    # ── Method 4: Invidious ───────────────
     def _method_4_invidious(self, video_url, video_id):
-        """
-        Use Invidious (YouTube alternative frontend)
-        to bypass geo restrictions
-        """
-        # List of public Invidious instances
         invidious_instances = [
             "https://invidious.snopyta.org",
             "https://invidious.kavin.rocks",
@@ -125,13 +120,14 @@ class VideoDownloader:
 
         for instance in invidious_instances:
             invidious_url = f"{instance}/watch?v={video_id}"
-            print(f"   🔄 Trying Invidious: {instance}")
+            print(f"   🔄 Trying: {instance}")
 
             ydl_opts = {
-                'format'      : 'best[height<=720]',
-                'outtmpl'     : output_path,
-                'quiet'       : True,
-                'no_warnings' : True,
+                'format'        : 'best[height<=720]',
+                'outtmpl'       : output_path,
+                'quiet'         : True,
+                'no_warnings'   : True,
+                'cookiefile'    : 'cookies.txt',
                 'postprocessors': [{
                     'key'           : 'FFmpegVideoConvertor',
                     'preferedformat': 'mp4'
@@ -140,7 +136,6 @@ class VideoDownloader:
 
             result = self._run_download(ydl_opts, invidious_url, video_id)
             if result:
-                # Also try to get thumbnail directly
                 if not result.get('thumbnail_file'):
                     result['thumbnail_file'] = self._download_thumbnail(video_id)
                 return result
@@ -149,7 +144,7 @@ class VideoDownloader:
 
         return None
 
-    # ── Core Download Runner ──────────────
+    # ── Core Runner ───────────────────────
     def _run_download(self, ydl_opts, video_url, video_id):
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -164,10 +159,9 @@ class VideoDownloader:
                     break
 
             if not video_file:
-                # Search directory
                 for f in os.listdir(DOWNLOADS_DIR):
                     if video_id in f and not f.endswith(
-                        ('.jpg', '.png', '.webp')
+                        ('.jpg', '.png', '.webp', '.jpeg')
                     ):
                         video_file = os.path.join(DOWNLOADS_DIR, f)
                         break
@@ -199,7 +193,7 @@ class VideoDownloader:
                 "blocked_countries": blocked,
             }
 
-        except Exception as e:
+        except Exception:
             return None
 
     # ── Get Blocked Countries ─────────────
