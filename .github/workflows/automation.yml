@@ -4,6 +4,19 @@ on:
   repository_dispatch:
     types: [new_video_detected]
   workflow_dispatch:
+    inputs:
+      video_id:
+        description: 'YouTube Video ID'
+        required: false
+        default: ''
+      video_url:
+        description: 'YouTube Video URL'
+        required: false
+        default: ''
+      video_title:
+        description: 'Video Title'
+        required: false
+        default: 'Test Video'
 
 jobs:
   upload:
@@ -35,21 +48,30 @@ jobs:
       - name: Create Credentials
         run: |
           echo '${{ secrets.CLIENT_SECRETS }}' > client_secrets.json
-          echo '${{ secrets.YOUTUBE_TOKEN }}' > token.json
+          echo '${{ secrets.YOUTUBE_TOKEN }}'  > token.json
+
+      - name: Set Video Variables
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "VIDEO_ID=${{ github.event.inputs.video_id }}"       >> $GITHUB_ENV
+            echo "VIDEO_URL=${{ github.event.inputs.video_url }}"     >> $GITHUB_ENV
+            echo "VIDEO_TITLE=${{ github.event.inputs.video_title }}" >> $GITHUB_ENV
+          else
+            echo "VIDEO_ID=${{ github.event.client_payload.video_id }}"       >> $GITHUB_ENV
+            echo "VIDEO_URL=${{ github.event.client_payload.video_url }}"     >> $GITHUB_ENV
+            echo "VIDEO_TITLE=${{ github.event.client_payload.video_title }}" >> $GITHUB_ENV
+          fi
 
       - name: Run Automation
         run: python main.py run
         env:
-          VIDEO_ID     : ${{ github.event.client_payload.video_id }}
-          VIDEO_URL    : ${{ github.event.client_payload.video_url }}
-          VIDEO_TITLE  : ${{ github.event.client_payload.video_title }}
           VIDEO_PRIVACY: public
 
       - name: Save Database
         if: always()
         run: |
-          git config user.name "automation-bot"
+          git config user.name  "automation-bot"
           git config user.email "bot@github.com"
           git add database.json || true
-          git diff --staged --quiet || git commit -m "Update database - $(date)"
+          git diff --staged --quiet || git commit -m "Update DB"
           git push || true

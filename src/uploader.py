@@ -1,8 +1,8 @@
 import os
-from googleapiclient.http import MediaFileUpload
+from googleapiclient.http   import MediaFileUpload
 from googleapiclient.errors import HttpError
-from src.config import DEFAULT_PRIVACY, DEFAULT_CATEGORY, DEFAULT_LANGUAGE
-from src.database import Database
+from src.config          import DEFAULT_PRIVACY, DEFAULT_CATEGORY, DEFAULT_LANGUAGE
+from src.database        import Database
 from src.title_generator import TitleGenerator
 from src.thumbnail_editor import ThumbnailEditor
 
@@ -23,21 +23,24 @@ class VideoUploader:
             return None
 
         video_id  = video_info.get("video_id")
-        new_title = self.title_gen.generate_title(video_info.get("title", "Video"))
-        new_desc  = self.title_gen.generate_description(video_info.get("description", ""))
+        new_title = self.title_gen.generate_title(
+            video_info.get("title", "Video")
+        )
+        new_desc  = self.title_gen.generate_description(
+            video_info.get("description", "")
+        )
 
-        # ✅ Get blocked countries from source video
+        # ✅ Auto copy blocked countries from source
         blocked_countries = video_info.get("blocked_countries", [])
 
-        print(f"📤 Uploading to @TekoGopal-o6f5f")
+        print(f"\n📤 Uploading to @TekoGopal-o6f5f")
         print(f"   Title   : {new_title}")
-
         if blocked_countries:
-            print(f"   Blocking: {blocked_countries} (same as source)")
+            print(f"   Blocking: {len(blocked_countries)} countries (same as source)")
         else:
-            print(f"   Blocking: None (source has no restrictions)")
+            print(f"   Blocking: None")
 
-        # Build request body
+        # Build body
         body = {
             "snippet": {
                 "title"               : new_title,
@@ -54,8 +57,9 @@ class VideoUploader:
             }
         }
 
-        # ✅ Apply same country restrictions as source
         part = "snippet,status"
+
+        # ✅ Apply same country block as source
         if blocked_countries:
             body["contentDetails"] = {
                 "regionRestriction": {
@@ -71,19 +75,15 @@ class VideoUploader:
         )
 
         try:
-            request  = self.youtube.videos().insert(
+            response    = self.youtube.videos().insert(
                 part       = part,
                 body       = body,
                 media_body = media
-            )
-            response    = request.execute()
-            uploaded_id = response.get("id")
+            ).execute()
 
+            uploaded_id = response.get("id")
             print(f"✅ Uploaded! ID: {uploaded_id}")
             print(f"🔗 https://youtu.be/{uploaded_id}")
-
-            if blocked_countries:
-                print(f"🌍 Blocked in: {len(blocked_countries)} countries (same as source)")
 
             # Set thumbnail
             thumb = video_info.get("thumbnail_file")

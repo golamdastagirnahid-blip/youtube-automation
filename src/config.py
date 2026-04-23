@@ -10,8 +10,8 @@ def load_channels():
                     channels.append(line)
     return channels
 
-SOURCE_CHANNELS = load_channels()
-DEFAULT_PRIVACY  = os.environ.get("VIDEO_PRIVACY", "public")
+SOURCE_CHANNELS  = load_channels()
+DEFAULT_PRIVACY  = os.environ.get("VIDEO_PRIVACY",  "public")
 DEFAULT_CATEGORY = os.environ.get("VIDEO_CATEGORY", "22")
 DEFAULT_LANGUAGE = "en"
 DEFAULT_TAGS     = ["entertainment", "viral", "trending"]

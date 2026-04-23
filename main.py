@@ -7,6 +7,7 @@ from src.uploader   import VideoUploader
 
 
 class YouTubeAutomation:
+
     def __init__(self):
         self.db         = Database()
         self.auth       = YouTubeAuth()
@@ -44,22 +45,25 @@ class YouTubeAutomation:
         print(f"   ID    : {video_id}")
 
         if self.db.is_video_uploaded(video_id):
-            print("⏭️ Already uploaded before. Skipping.")
+            print("⏭️ Already uploaded. Skipping.")
             return
 
         if not self.setup():
             return
 
+        # Download with multiple fallback methods
         print("\n📥 Downloading...")
         result = self.downloader.download_video(video_url, video_id)
 
         if not result:
-            print("❌ Download failed")
+            print("❌ All download methods failed")
             return
 
+        # Upload
         print("\n📤 Uploading...")
         upload = self.uploader.upload_video(result)
 
+        # Cleanup
         for key in ["video_file", "thumbnail_file"]:
             f = result.get(key)
             if f and os.path.exists(f):
@@ -76,8 +80,7 @@ class YouTubeAutomation:
 
     def auth_only(self):
         self.auth.authenticate()
-        print(f"✅ Target Channel ID: {self.auth.get_target_channel_id()}")
-        print(f"✅ Will upload to: @TekoGopal-o6f5f")
+        print(f"✅ Target: {self.auth.get_target_channel_id()}")
 
 
 def main():
@@ -87,7 +90,7 @@ def main():
     if   command == "run"   : tool.run()
     elif command == "status": tool.status()
     elif command == "auth"  : tool.auth_only()
-    else: print(f"Unknown command: {command}")
+    else: print(f"Unknown: {command}")
 
 
 if __name__ == "__main__":
