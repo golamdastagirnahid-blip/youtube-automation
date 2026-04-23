@@ -1,7 +1,5 @@
 """
-Video Processor
-Modifies video to bypass Content ID detection
-Uses FFmpeg for all modifications
+Video Processor - Strong Content ID Bypass
 """
 
 import os
@@ -23,14 +21,10 @@ class VideoProcessor:
     # Main Process Function
     # ─────────────────────────────────────────────
     def process(self, video_file, video_id):
-        """
-        Apply all modifications to bypass Content ID
-        Returns path to processed video
-        """
         print(f"\n🎬 Processing video for Content ID bypass...")
 
         if not video_file or not os.path.exists(video_file):
-            print("   ❌ Video file not found for processing")
+            print("   ❌ Video file not found")
             return video_file
 
         output_file = os.path.join(
@@ -38,22 +32,23 @@ class VideoProcessor:
             f"{video_id}_processed.mp4"
         )
 
-        # If already processed
         if os.path.exists(output_file):
             os.remove(output_file)
 
-        # Pick random speed
-        speed = random.choice([1.03, 1.05, 0.97, 0.95])
+        # Random strong speed change
+        speed = random.choice([1.15, 1.12, 0.88, 0.85])
 
-        # Build video filters
-        vf = self._video_filters(speed)
+        # Random rotation (very slight)
+        rotation = random.choice([0.5, 1.0, -0.5, -1.0])
 
-        # Build audio filters
+        # Build filters
+        vf = self._video_filters(speed, rotation)
         af = self._audio_filters(speed)
 
-        print(f"   🔧 Video filter : {vf}")
-        print(f"   🔊 Audio filter : {af}")
-        print(f"   ⚡ Speed        : {speed}x")
+        print(f"   ⚡ Speed    : {speed}x")
+        print(f"   🔄 Rotation : {rotation}°")
+        print(f"   🔧 Video    : {vf}")
+        print(f"   🔊 Audio    : {af}")
 
         cmd = [
             "ffmpeg",
@@ -71,15 +66,16 @@ class VideoProcessor:
         ]
 
         try:
-            print(f"   ⏳ Processing... (may take 2-5 minutes)")
+            print(f"   ⏳ Processing... (may take 3-6 minutes)")
             result = subprocess.run(
                 cmd,
                 capture_output = True,
                 text           = True,
-                timeout        = 1800  # 30 min timeout
+                timeout        = 1800
             )
 
-            if result.returncode == 0 and os.path.exists(output_file):
+            if result.returncode == 0 and \
+               os.path.exists(output_file):
                 orig_size = os.path.getsize(video_file)
                 proc_size = os.path.getsize(output_file)
                 print(f"   ✅ Processing complete!")
@@ -92,80 +88,89 @@ class VideoProcessor:
                     f"{proc_size  // 1024 // 1024} MB"
                 )
                 return output_file
-
             else:
-                print(f"   ❌ FFmpeg error:")
-                print(f"   {result.stderr[-500:]}")
-                print(f"   ⚠️ Using original file instead")
+                print(f"   ❌ FFmpeg error")
+                print(f"   {result.stderr[-300:]}")
                 return video_file
 
         except subprocess.TimeoutExpired:
-            print(f"   ⏰ Processing timed out — using original")
+            print(f"   ⏰ Timeout — using original")
             return video_file
-
         except Exception as e:
-            print(f"   ⚠️ Processing error: {e}")
-            print(f"   ⚠️ Using original file instead")
+            print(f"   ⚠️ Error: {e}")
             return video_file
 
     # ─────────────────────────────────────────────
-    # Video Filters
+    # Strong Video Filters
     # ─────────────────────────────────────────────
-    def _video_filters(self, speed=1.05):
-        """
-        Build video filter chain:
-        1. Horizontal flip  → defeats Content ID
-        2. Zoom 103%        → changes pixel positions
-        3. Brightness tweak → changes color values
-        4. Speed change     → changes frame timing
-        """
+    def _video_filters(self, speed=1.15, rotation=1.0):
         pts = 1.0 / speed
+
+        # Random color shift values
+        brightness = random.choice([0.04, 0.05, 0.06])
+        contrast   = random.choice([1.03, 1.04, 1.05])
+        saturation = random.choice([1.02, 1.03, 1.04])
 
         filters = [
             # 1. Flip horizontally
             "hflip",
 
-            # 2. Zoom in 3% then crop back to original size
-            "scale=iw*1.03:ih*1.03",
-            "crop=iw/1.03:ih/1.03",
+            # 2. Slight rotation
+            f"rotate={rotation}*PI/180:fillcolor=black",
 
-            # 3. Slight color adjustment
-            "eq=brightness=0.02:contrast=1.02:saturation=1.01",
+            # 3. Zoom 5% (stronger than before)
+            "scale=iw*1.05:ih*1.05",
+            "crop=iw/1.05:ih/1.05",
 
-            # 4. Speed adjustment
+            # 4. Stronger color modification
+            f"eq=brightness={brightness}:"
+            f"contrast={contrast}:"
+            f"saturation={saturation}",
+
+            # 5. Add slight blur then sharpen
+            # (changes pixel fingerprint)
+            "unsharp=3:3:0.5:3:3:0.0",
+
+            # 6. Speed change
             f"setpts={pts:.4f}*PTS",
         ]
 
         return ",".join(filters)
 
     # ─────────────────────────────────────────────
-    # Audio Filters
+    # Strong Audio Filters
     # ─────────────────────────────────────────────
-    def _audio_filters(self, speed=1.05):
-        """
-        Build audio filter chain:
-        1. Pitch shift   → defeats audio Content ID
-        2. Speed match   → matches video speed
-        """
-        # Slight pitch shift up
-        pitch = 1.03
+    def _audio_filters(self, speed=1.15):
+        # Stronger pitch shift
+        pitch = random.choice([1.06, 1.08, 0.94, 0.92])
+
+        # Random equalizer settings
+        eq_freq = random.choice([800, 1000, 1200])
+        eq_gain = random.choice([2, 3, -2, -3])
 
         filters = [
-            # 1. Change pitch slightly
+            # 1. Strong pitch shift
             f"asetrate=44100*{pitch}",
             "aresample=44100",
 
-            # 2. Match audio speed to video speed
+            # 2. Match speed
             f"atempo={speed:.4f}",
+
+            # 3. Equalizer (changes audio fingerprint)
+            f"equalizer=f={eq_freq}:width_type=o:"
+            f"width=2:g={eq_gain}",
+
+            # 4. Very subtle noise (changes waveform)
+            "aeval=val(0)+random(0)*0.002|"
+            "val(1)+random(1)*0.002:c=stereo",
         ]
 
         return ",".join(filters)
 
     # ─────────────────────────────────────────────
-    # Cleanup Processed Files
+    # Cleanup
     # ─────────────────────────────────────────────
     def cleanup(self, video_id):
-        """Remove processed file after upload"""
         processed = os.path.join(
             self.processed_dir,
             f"{video_id}_processed.mp4"
