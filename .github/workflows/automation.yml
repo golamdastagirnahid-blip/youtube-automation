@@ -49,33 +49,48 @@ jobs:
       - name: Setup Windscribe VPN
         run: |
           echo "🌐 Installing Windscribe VPN..."
+
+          # Download Windscribe
           wget -q "https://windscribe.com/install/desktop/linux_deb_x64" \
             -O windscribe.deb
+
+          # Install Windscribe
           sudo dpkg -i windscribe.deb 2>/dev/null || true
           sudo apt-get install -f -y 2>/dev/null || true
+
+          # Start Windscribe service
+          sudo systemctl start windscribe 2>/dev/null || true
+          sleep 3
 
           echo "🔐 Logging into Windscribe..."
           windscribe login \
             ${{ secrets.WINDSCRIBE_USERNAME }} \
-            ${{ secrets.WINDSCRIBE_PASSWORD }}
+            ${{ secrets.WINDSCRIBE_PASSWORD }} || true
+
+          sleep 3
 
           echo "🔌 Connecting to India server..."
-          windscribe connect India || windscribe connect Best
+          windscribe connect India || true
 
-          echo "⏳ Waiting 15 seconds for connection..."
-          sleep 15
-
-          echo ""
-          echo "✅ VPN Connected — Current IP:"
-          curl -s https://ifconfig.me
+          echo "⏳ Waiting 20 seconds for VPN to stabilize..."
+          sleep 20
 
           echo ""
-          echo "🌍 Location Check:"
-          curl -s https://ipapi.co/json/ | python3 -c \
-            "import sys,json
-          d=json.load(sys.stdin)
-          print(f'  Country : {d[\"country_name\"]}')
-          print(f'  IP      : {d[\"ip\"]}')" || true
+          echo "✅ VPN Status:"
+          windscribe status || true
+
+          echo ""
+          echo "🌍 Current IP and Location:"
+          curl -s https://ipapi.co/json/ | python3 -c "
+          import sys, json
+          try:
+              d = json.load(sys.stdin)
+              print(f'  IP      : {d[\"ip\"]}')
+              print(f'  Country : {d[\"country_name\"]}')
+              print(f'  City    : {d[\"city\"]}')
+          except:
+              print('  Could not get location info')
+          " || true
 
       # ── Step 5: Install Dependencies ──────────────────
       - name: Install Dependencies
@@ -99,24 +114,27 @@ jobs:
           echo '${{ secrets.YOUTUBE_TOKEN }}'  > token.json
           printf '%s' '${{ secrets.COOKIES_TXT }}' > cookies.txt
 
-      # ── Step 8: Verify Credentials ────────────────────
-      - name: Verify Credentials
+      # ── Step 8: Verify Files ───────────────────────────
+      - name: Verify Files
         run: |
           echo "📁 Checking credential files..."
+
           if [ -f "cookies.txt" ]; then
             SIZE=$(wc -c < cookies.txt)
             echo "✅ cookies.txt found ($SIZE bytes)"
-            if [ "$SIZE" -lt 100 ]; then
-              echo "⚠️ WARNING: cookies.txt is too small - may be invalid!"
+            if [ "$SIZE" -lt 500 ]; then
+              echo "⚠️ WARNING: cookies.txt seems too small!"
             fi
           else
             echo "❌ cookies.txt NOT found!"
           fi
+
           if [ -f "client_secrets.json" ]; then
             echo "✅ client_secrets.json found"
           else
             echo "❌ client_secrets.json NOT found!"
           fi
+
           if [ -f "token.json" ]; then
             echo "✅ token.json found"
           else
