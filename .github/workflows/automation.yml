@@ -40,71 +40,84 @@ jobs:
           ref: main
 
       - name: Install Dependencies
+        shell: powershell
         run: |
-          pip install -U yt-dlp
-          pip install -r requirements.txt
-          echo "✅ Dependencies ready"
+          python -m pip install --upgrade pip
+          python -m pip install -U yt-dlp
+          python -m pip install -r requirements.txt
+          Write-Host "✅ Dependencies ready"
+          python -m yt_dlp --version
 
       - name: Create Credentials
+        shell: powershell
         run: |
-          echo '${{ secrets.CLIENT_SECRETS }}' > client_secrets.json
-          echo '${{ secrets.YOUTUBE_TOKEN }}'  > token.json
-          echo "✅ Credentials created"
+          '${{ secrets.CLIENT_SECRETS }}' | `
+            Out-File -FilePath client_secrets.json `
+            -Encoding utf8
+          '${{ secrets.YOUTUBE_TOKEN }}' | `
+            Out-File -FilePath token.json `
+            -Encoding utf8
+          Write-Host "✅ Credentials created"
 
       - name: Create Database If Missing
+        shell: powershell
         run: |
-          if not exist database.json (
-            echo {"uploaded_videos":[],"daily_counts":{},"statistics":{"total_uploads":0},"queued":[]} > database.json
-            echo ✅ database.json created
-          ) else (
-            echo ✅ database.json exists
-          )
+          if (-not (Test-Path "database.json")) {
+            $db = '{"uploaded_videos":[],"daily_counts":{},"statistics":{"total_uploads":0},"queued":[]}'
+            $db | Out-File -FilePath database.json -Encoding utf8
+            Write-Host "✅ database.json created"
+          } else {
+            Write-Host "✅ database.json exists"
+          }
 
       - name: Set Variables
-        shell: bash
+        shell: powershell
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VIDEO_ID="${{ github.event.inputs.video_id }}"
-            VIDEO_URL="${{ github.event.inputs.video_url }}"
-            VIDEO_TITLE="${{ github.event.inputs.video_title }}"
-            VIDEO_PRIVACY="${{ github.event.inputs.video_privacy }}"
-          else
-            VIDEO_ID="${{ github.event.client_payload.video_id }}"
-            VIDEO_URL="${{ github.event.client_payload.video_url }}"
-            VIDEO_TITLE="${{ github.event.client_payload.video_title }}"
-            VIDEO_PRIVACY="${{ github.event.client_payload.video_privacy }}"
-          fi
-          [ -z "$VIDEO_PRIVACY" ] && VIDEO_PRIVACY="public"
-          [ -z "$VIDEO_TITLE" ]   && VIDEO_TITLE="Relaxing Video"
-          echo "VIDEO_ID=$VIDEO_ID"           >> $GITHUB_ENV
-          echo "VIDEO_URL=$VIDEO_URL"         >> $GITHUB_ENV
-          echo "VIDEO_TITLE=$VIDEO_TITLE"     >> $GITHUB_ENV
-          echo "VIDEO_PRIVACY=$VIDEO_PRIVACY" >> $GITHUB_ENV
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $VIDEO_ID      = "${{ github.event.inputs.video_id }}"
+            $VIDEO_URL     = "${{ github.event.inputs.video_url }}"
+            $VIDEO_TITLE   = "${{ github.event.inputs.video_title }}"
+            $VIDEO_PRIVACY = "${{ github.event.inputs.video_privacy }}"
+          } else {
+            $VIDEO_ID      = "${{ github.event.client_payload.video_id }}"
+            $VIDEO_URL     = "${{ github.event.client_payload.video_url }}"
+            $VIDEO_TITLE   = "${{ github.event.client_payload.video_title }}"
+            $VIDEO_PRIVACY = "${{ github.event.client_payload.video_privacy }}"
+          }
+          if (-not $VIDEO_PRIVACY) { $VIDEO_PRIVACY = "public" }
+          if (-not $VIDEO_TITLE)   { $VIDEO_TITLE   = "Relaxing Video" }
+          echo "VIDEO_ID=$VIDEO_ID"           >> $env:GITHUB_ENV
+          echo "VIDEO_URL=$VIDEO_URL"         >> $env:GITHUB_ENV
+          echo "VIDEO_TITLE=$VIDEO_TITLE"     >> $env:GITHUB_ENV
+          echo "VIDEO_PRIVACY=$VIDEO_PRIVACY" >> $env:GITHUB_ENV
 
       - name: Show Video Info
-        shell: bash
+        shell: powershell
         run: |
-          echo "========================================"
-          echo "🎬 Video Information"
-          echo "   ID     : ${{ env.VIDEO_ID }}"
-          echo "   URL    : ${{ env.VIDEO_URL }}"
-          echo "   Title  : ${{ env.VIDEO_TITLE }}"
-          echo "   Privacy: ${{ env.VIDEO_PRIVACY }}"
-          echo "========================================"
+          Write-Host "========================================"
+          Write-Host "🎬 Video Information"
+          Write-Host "   ID     : ${{ env.VIDEO_ID }}"
+          Write-Host "   URL    : ${{ env.VIDEO_URL }}"
+          Write-Host "   Title  : ${{ env.VIDEO_TITLE }}"
+          Write-Host "   Privacy: ${{ env.VIDEO_PRIVACY }}"
+          Write-Host "========================================"
 
       - name: Test YouTube Access
-        shell: bash
+        shell: powershell
         run: |
-          echo "🧪 Testing YouTube access..."
-          python -m yt_dlp \
-            --skip-download \
-            --print duration_string \
-            "${{ env.VIDEO_URL }}" \
-            && echo "✅ YouTube OK!" \
-            || echo "⚠️ Test failed"
+          Write-Host "🧪 Testing YouTube access..."
+          python -m yt_dlp `
+            --skip-download `
+            --print duration_string `
+            "${{ env.VIDEO_URL }}"
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "✅ YouTube OK!"
+          } else {
+            Write-Host "⚠️ Test failed but continuing..."
+          }
 
       - name: Run Automation
-        shell: bash
+        shell: powershell
         run: python main.py run
         env:
           VIDEO_ID:           ${{ env.VIDEO_ID }}
@@ -115,22 +128,25 @@ jobs:
 
       - name: Save Database
         if: always()
-        shell: bash
+        shell: powershell
         run: |
           git config user.name  "automation-bot"
           git config user.email "bot@github.com"
-          git add database.json || true
-          git diff --staged --quiet || \
+          git add database.json
+          $diff = git diff --staged --quiet
+          if ($LASTEXITCODE -ne 0) {
             git commit -m "Update DB [skip ci]"
-          git push || true
+            git push
+          }
+          Write-Host "✅ Database saved"
 
       - name: Cleanup
         if: always()
-        shell: bash
+        shell: powershell
         run: |
-          rm -rf downloads/  || true
-          rm -rf processed/  || true
-          rm -rf thumbnails/ || true
-          rm -f  token.json  || true
-          rm -f  client_secrets.json || true
-          echo "✅ Cleanup done"
+          Remove-Item -Recurse -Force downloads  -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force processed  -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force thumbnails -ErrorAction SilentlyContinue
+          Remove-Item -Force token.json          -ErrorAction SilentlyContinue
+          Remove-Item -Force client_secrets.json -ErrorAction SilentlyContinue
+          Write-Host "✅ Cleanup done"
