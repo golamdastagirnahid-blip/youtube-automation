@@ -1,7 +1,7 @@
 """
 YouTube Automation - Main Entry Point
 Handles sleep/relax content channels
-Uses Cloudflare WARP VPN for clean IP
+Uses OAuth2 for clean authentication - No VPN needed
 """
 
 import os
@@ -147,29 +147,21 @@ class YouTubeAutomation:
     # ─────────────────────────────────────────────
     def get_video_info(self, video_url):
         """
-        Get video duration and check if live.
-        WARP VPN is active so no proxy needed.
-        Returns:
-            duration → normal video
-            -1       → live
-            -2       → upcoming
-             0       → error
+        Get video duration using OAuth2
+        No VPN or cookies needed
         """
         import yt_dlp
 
+        # Try OAuth2 first
         ydl_opts = {
-            'quiet'          : True,
-            'no_warnings'    : True,
-            'skip_download'  : True,
-            'format'         : None,
-            'noplaylist'     : True,
-            'cookiefile'     : 'cookies.txt',
-            'socket_timeout' : 30,
-            'extractor_args' : {
-                'youtube': {
-                    'player_client': ['android'],
-                }
-            },
+            'quiet'         : True,
+            'no_warnings'   : True,
+            'skip_download' : True,
+            'format'        : None,
+            'noplaylist'    : True,
+            'username'      : 'oauth2',
+            'password'      : '',
+            'socket_timeout': 30,
         }
 
         try:
@@ -215,6 +207,62 @@ class YouTubeAutomation:
             if 'live' in err.lower():
                 return -1
             print(f"⚠️ Info error: {e}")
+
+        # Fallback: android client
+        print(f"   🔄 Fallback: android client...")
+        ydl_opts_fallback = {
+            'quiet'          : True,
+            'no_warnings'    : True,
+            'skip_download'  : True,
+            'format'         : None,
+            'noplaylist'     : True,
+            'socket_timeout' : 30,
+            'extractor_args' : {
+                'youtube': {
+                    'player_client': ['android'],
+                }
+            },
+        }
+
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts_fallback) as ydl:
+                info = ydl.extract_info(
+                    video_url,
+                    download = False,
+                    process  = False
+                )
+
+                if not info:
+                    return 0
+
+                is_live     = info.get('is_live', False)
+                live_status = info.get('live_status', '')
+
+                if is_live or live_status == 'is_live':
+                    print(f"   🔴 Live — skipping")
+                    return -1
+
+                if live_status == 'is_upcoming':
+                    print(f"   📅 Upcoming — skipping")
+                    return -2
+
+                duration = info.get('duration', 0)
+
+                if not duration or duration == 0:
+                    print(f"   ⚠️ No duration")
+                    return 0
+
+                print(
+                    f"   ✅ Duration: "
+                    f"{self.format_duration(duration)}"
+                )
+                return duration
+
+        except Exception as e:
+            err = str(e)
+            if 'live' in err.lower():
+                return -1
+            print(f"⚠️ Fallback error: {e}")
             return 0
 
     # ─────────────────────────────────────────────
