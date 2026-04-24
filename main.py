@@ -1,219 +1,415 @@
-name: Video Upload
+"""
+YouTube Automation - Main Entry Point
+Handles sleep/relax content channels
+"""
 
-on:
-  repository_dispatch:
-    types: [new_video_detected]
-  workflow_dispatch:
-    inputs:
-      video_id:
-        description: 'YouTube Video ID'
-        required: true
-        default: ''
-      video_url:
-        description: 'YouTube Video URL'
-        required: true
-        default: ''
-      video_title:
-        description: 'Video Title'
-        required: false
-        default: 'Relaxing Video'
-      video_privacy:
-        description: 'Privacy (public/private/unlisted)'
-        required: false
-        default: 'public'
+import os
+import sys
+import json
+import time
+import random
+import feedparser
+import requests
+from datetime import datetime
 
-jobs:
-  upload:
-    runs-on: ubuntu-latest
-    timeout-minutes: 360
-    permissions:
-      contents: write
 
-    steps:
+# ─────────────────────────────────────────────────────────
+# Database Class
+# ─────────────────────────────────────────────────────────
+class Database:
 
-      # ── Step 1: Checkout ────────────────────────
-      - name: Checkout Code
-        uses: actions/checkout@v4
-        with:
-          token:       ${{ secrets.GH_TOKEN }}
-          clean:       true
-          fetch-depth: 1
-          ref:         main
+    def __init__(self):
+        self.db_file = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "database.json"
+        )
+        self.data = self._load()
 
-      # ── Step 2: Show File Versions ───────────────
-      - name: Show File Versions
-        run: |
-          echo "==============================="
-          echo "=== main.py lines 80-95 ==="
-          echo "==============================="
-          sed -n '80,95p' main.py
+    def _load(self):
+        if os.path.exists(self.db_file):
+            try:
+                with open(self.db_file, "r") as f:
+                    data = json.load(f)
+                if "uploaded_videos" not in data:
+                    data["uploaded_videos"] = []
+                if "daily_counts" not in data:
+                    data["daily_counts"] = {}
+                if "statistics" not in data:
+                    data["statistics"] = {
+                        "total_uploads": 0
+                    }
+                if "queued" not in data:
+                    data["queued"] = []
+                return data
+            except Exception:
+                pass
+        return {
+            "uploaded_videos": [],
+            "daily_counts"   : {},
+            "statistics"     : {"total_uploads": 0},
+            "queued"         : [],
+        }
 
-          echo ""
-          echo "==============================="
-          echo "=== uploader.py lines 1-15 ==="
-          echo "==============================="
-          sed -n '1,15p' src/uploader.py
+    def save(self):
+        with open(self.db_file, "w") as f:
+            json.dump(self.data, f, indent=4)
 
-          echo ""
-          echo "==============================="
-          echo "=== Git log last 5 commits ==="
-          echo "==============================="
-          git log --oneline -5
+    def is_video_uploaded(self, video_id):
+        return video_id in self.data.get(
+            "uploaded_videos", []
+        )
 
-      # ── Step 3: Setup Python ────────────────────
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+    def mark_video_uploaded(self, video_id, info={}):
+        if video_id not in self.data.get(
+            "uploaded_videos", []
+        ):
+            self.data["uploaded_videos"].append(video_id)
+            self.data["statistics"]["total_uploads"] += 1
+            today = datetime.now().strftime("%Y-%m-%d")
+            self.data["daily_counts"][today] = (
+                self.data["daily_counts"].get(today, 0) + 1
+            )
+            self.save()
 
-      # ── Step 4: Install FFmpeg ───────────────────
-      - name: Install FFmpeg
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y ffmpeg
-          echo "✅ FFmpeg: $(ffmpeg -version | head -1)"
+    def get_statistics(self):
+        return self.data.get(
+            "statistics",
+            {"total_uploads": 0}
+        )
 
-      # ── Step 5: Install Dependencies ────────────
-      - name: Install Dependencies
-        run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -U yt-dlp
-          echo "✅ yt-dlp: $(yt-dlp --version)"
 
-      # ── Step 6: Restore Database ─────────────────
-      - name: Restore Database
-        uses: actions/cache@v4
-        with:
-          path: database.json
-          key: db-v1
-          restore-keys: db-v1
+# ─────────────────────────────────────────────────────────
+# Imports
+# ─────────────────────────────────────────────────────────
+from src.auth                import YouTubeAuth
+from src.downloader          import VideoDownloader
+from src.uploader            import VideoUploader
+from src.video_processor     import VideoProcessor
+from src.ai_generator        import AIGenerator
+from src.thumbnail_generator import ThumbnailGenerator
 
-      # ── Step 7: Create Credentials ───────────────
-      - name: Create Credentials
-        run: |
-          echo '${{ secrets.CLIENT_SECRETS }}' > client_secrets.json
-          echo '${{ secrets.YOUTUBE_TOKEN }}'  > token.json
-          printf '%s' '${{ secrets.COOKIES_TXT }}' > cookies.txt
-          echo "✅ Credentials created"
 
-      # ── Step 8: Verify Files ─────────────────────
-      - name: Verify Files
-        run: |
-          echo "📁 Checking files..."
-          if [ -f cookies.txt ]; then
-            echo "✅ cookies.txt ($(wc -c < cookies.txt) bytes)"
-          else
-            echo "❌ cookies.txt missing"
-          fi
-          if [ -f client_secrets.json ]; then
-            echo "✅ client_secrets.json found"
-          else
-            echo "❌ client_secrets.json missing"
-          fi
-          if [ -f token.json ]; then
-            echo "✅ token.json found"
-          else
-            echo "❌ token.json missing"
-          fi
-          if [ -f database.json ]; then
-            echo "✅ database.json found"
-          else
-            echo "⚠️ Creating database.json..."
-            echo '{
-              "uploaded_videos": [],
-              "daily_counts": {},
-              "statistics": {"total_uploads": 0},
-              "queued": []
-            }' > database.json
-            echo "✅ database.json created"
-          fi
+# ─────────────────────────────────────────────────────────
+# Constants
+# ─────────────────────────────────────────────────────────
+MIN_DURATION_SECONDS = 60  * 60
+MAX_PART_SECONDS     = 4   * 60 * 60
+MAX_DURATION_SECONDS = 24  * 60 * 60
 
-      # ── Step 9: Set Variables ────────────────────
-      - name: Set Variables
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VIDEO_ID="${{ github.event.inputs.video_id }}"
-            VIDEO_URL="${{ github.event.inputs.video_url }}"
-            VIDEO_TITLE="${{ github.event.inputs.video_title }}"
-            VIDEO_PRIVACY="${{ github.event.inputs.video_privacy }}"
-          else
-            VIDEO_ID="${{ github.event.client_payload.video_id }}"
-            VIDEO_URL="${{ github.event.client_payload.video_url }}"
-            VIDEO_TITLE="${{ github.event.client_payload.video_title }}"
-            VIDEO_PRIVACY="${{ github.event.client_payload.video_privacy }}"
-          fi
 
-          [ -z "$VIDEO_PRIVACY" ] && VIDEO_PRIVACY="public"
-          [ -z "$VIDEO_TITLE"   ] && VIDEO_TITLE="Relaxing Video"
+# ─────────────────────────────────────────────────────────
+# Main Class
+# ─────────────────────────────────────────────────────────
+class YouTubeAutomation:
 
-          echo "VIDEO_ID=$VIDEO_ID"           >> $GITHUB_ENV
-          echo "VIDEO_URL=$VIDEO_URL"         >> $GITHUB_ENV
-          echo "VIDEO_TITLE=$VIDEO_TITLE"     >> $GITHUB_ENV
-          echo "VIDEO_PRIVACY=$VIDEO_PRIVACY" >> $GITHUB_ENV
+    def __init__(self):
+        self.db        = Database()
+        self.auth      = YouTubeAuth()
+        self.downloader = VideoDownloader()
+        self.processor  = VideoProcessor()
+        self.ai         = AIGenerator()
+        self.thumb_gen  = ThumbnailGenerator()
+        self.youtube    = None
+        self.uploader   = None
 
-      # ── Step 10: Show Video Info ─────────────────
-      - name: Show Video Info
-        run: |
-          echo "============================================"
-          echo "🎬 Video Information"
-          echo "   ID      : ${{ env.VIDEO_ID }}"
-          echo "   URL     : ${{ env.VIDEO_URL }}"
-          echo "   Title   : ${{ env.VIDEO_TITLE }}"
-          echo "   Privacy : ${{ env.VIDEO_PRIVACY }}"
-          echo "============================================"
+    def setup(self):
+        print("=" * 60)
+        print("🎬 YouTube Automation")
+        print("   Mode   : Sleep/Relax Content")
+        print("   Target : @TekoGopal-o6f5f")
+        print("=" * 60)
 
-      # ── Step 11: Check Disk Space ────────────────
-      - name: Check Disk Space
-        run: |
-          echo "💾 Disk space:"
-          df -h
-          echo "📦 RAM:"
-          free -h
+        self.youtube = self.auth.authenticate()
+        if not self.youtube:
+            print("❌ Authentication failed!")
+            return False
 
-      # ── Step 12: Force Verify Source Files ───────
-      - name: Force Verify Source Files
-        run: |
-          echo "==============================="
-          echo "=== src/uploader.py FULL ==="
-          echo "==============================="
-          cat src/uploader.py
-          echo ""
-          echo "==============================="
-          echo "=== src/downloader.py line 1-10 ==="
-          echo "==============================="
-          sed -n '1,10p' src/downloader.py
+        target_id    = self.auth.get_target_channel_id()
+        self.uploader = VideoUploader(
+            self.youtube, target_id
+        )
+        print(f"✅ Target channel: {target_id}")
+        return True
 
-      # ── Step 13: Run Automation ──────────────────
-      - name: Run Automation
-        run: python main.py run
-        env:
-          VIDEO_ID:           ${{ env.VIDEO_ID }}
-          VIDEO_URL:          ${{ env.VIDEO_URL }}
-          VIDEO_TITLE:        ${{ env.VIDEO_TITLE }}
-          VIDEO_PRIVACY:      ${{ env.VIDEO_PRIVACY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+    def format_duration(self, seconds):
+        hours   = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        return f"{hours}h {minutes}m"
 
-      # ── Step 14: Save Database ───────────────────
-      - name: Save Database
-        if: always()
-        run: |
-          git config user.name  "automation-bot"
-          git config user.email "bot@github.com"
-          git add database.json || true
-          git diff --staged --quiet || \
-            git commit -m "Update DB [skip ci]"
-          git push || true
+    def get_video_duration(self, video_url):
+        try:
+            import yt_dlp
+            ydl_opts = {
+                'quiet'        : True,
+                'no_warnings'  : True,
+                'skip_download': True,
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(
+                    video_url, download=False
+                )
+                return info.get('duration', 0)
+        except Exception as e:
+            print(f"⚠️ Duration check error: {e}")
+            return 0
 
-      # ── Step 15: Cleanup ─────────────────────────
-      - name: Cleanup
-        if: always()
-        run: |
-          echo "🧹 Cleaning up..."
-          rm -rf downloads/  || true
-          rm -rf processed/  || true
-          rm -rf thumbnails/ || true
-          rm -f  cookies.txt || true
-          rm -f  token.json  || true
-          rm -f  client_secrets.json || true
-          echo "✅ Cleanup done"
+    def process_video(self, video_info):
+        vid_id    = video_info.get("video_id")
+        video_url = video_info.get("url")
+        title     = video_info.get("title", "Relaxing Video")
+
+        print(f"\n{'='*60}")
+        print(f"🎬 Processing: {title}")
+        print(f"   ID  : {vid_id}")
+        print(f"   URL : {video_url}")
+        print(f"{'='*60}")
+
+        if self.db.is_video_uploaded(vid_id):
+            print(f"⏭️ Already uploaded: {vid_id}")
+            return False
+
+        print(f"\n⏱️ Checking duration...")
+        duration = self.get_video_duration(video_url)
+
+        if duration == 0:
+            print(f"⚠️ Could not get duration — skipping")
+            return False
+
+        print(f"   Duration: {self.format_duration(duration)}")
+
+        if duration < MIN_DURATION_SECONDS:
+            print(
+                f"⏭️ Too short "
+                f"({self.format_duration(duration)}) "
+                f"— minimum 60 min — skipping"
+            )
+            self.db.mark_video_uploaded(vid_id, {
+                "title" : title,
+                "reason": "too_short",
+            })
+            return False
+
+        print(f"\n📥 Downloading audio...")
+        audio_file = self.downloader.download_audio(
+            video_url, vid_id
+        )
+
+        if not audio_file:
+            print("❌ Audio download failed")
+            return False
+
+        print(f"   ✅ Audio: {audio_file}")
+
+        print(f"\n🔊 Modifying audio...")
+        modified_audio = self.processor.modify_audio(
+            audio_file, vid_id
+        )
+        print(f"   ✅ Modified: {modified_audio}")
+
+        print(f"\n🤖 Generating AI metadata...")
+        ai_title, ai_desc = self.ai.generate_metadata(title)
+        print(f"   ✅ Title: {ai_title}")
+
+        num_parts = max(
+            1,
+            -(-int(duration) // MAX_PART_SECONDS)
+        )
+
+        print(f"\n📊 Split plan:")
+        print(f"   Duration : {self.format_duration(duration)}")
+        print(f"   Parts    : {num_parts}")
+
+        success_count = 0
+
+        for part_num in range(1, num_parts + 1):
+            print(f"\n{'─'*50}")
+            print(f"🎬 Part {part_num}/{num_parts}")
+            print(f"{'─'*50}")
+
+            start_sec     = (part_num - 1) * MAX_PART_SECONDS
+            end_sec       = min(
+                part_num * MAX_PART_SECONDS,
+                duration
+            )
+            part_duration = end_sec - start_sec
+
+            print(
+                f"   ⏱️ "
+                f"{self.format_duration(start_sec)} → "
+                f"{self.format_duration(end_sec)}"
+            )
+
+            print(f"\n🖼️ Generating thumbnail...")
+            thumb_file = self.thumb_gen.generate(
+                title    = ai_title,
+                part_num = part_num if num_parts > 1
+                           else None,
+                duration = self.format_duration(
+                    part_duration
+                )
+            )
+            print(f"   ✅ Thumbnail: {thumb_file}")
+
+            print(f"\n🎥 Creating video...")
+            part_video = self.processor\
+                .create_image_audio_video(
+                    audio_file = modified_audio,
+                    output_id  = f"{vid_id}_part{part_num}",
+                    start_sec  = start_sec,
+                    end_sec    = end_sec,
+                    thumb_file = thumb_file
+                )
+
+            if not part_video:
+                print(f"❌ Failed to create part {part_num}")
+                continue
+
+            print(f"   ✅ Video: {part_video}")
+
+            if num_parts > 1:
+                part_title = (
+                    f"{ai_title} "
+                    f"| Part {part_num} of {num_parts}"
+                )
+            else:
+                part_title = ai_title
+
+            part_desc = (
+                f"{ai_desc}\n\n"
+                f"⏱️ Duration: "
+                f"{self.format_duration(part_duration)}\n"
+            )
+            if num_parts > 1:
+                part_desc += (
+                    f"📌 Part {part_num} of {num_parts}\n"
+                    f"🕐 From: "
+                    f"{self.format_duration(start_sec)}\n"
+                )
+            part_desc += (
+                f"\n🎵 Perfect for:\n"
+                f"✅ Deep Sleep\n"
+                f"✅ Relaxation\n"
+                f"✅ Study & Focus\n"
+                f"✅ Meditation\n"
+                f"✅ Stress Relief\n\n"
+                f"👍 Like & Subscribe!\n"
+                f"🔔 Turn on notifications!\n\n"
+                f"#sleep #relaxing #meditation "
+                f"#study #focus"
+            )
+
+            print(f"\n📤 Uploading Part {part_num}...")
+
+            upload_result = self.uploader.upload_video({
+                "video_id"         : (
+                    f"{vid_id}_part{part_num}"
+                ),
+                "video_file"       : part_video,
+                "thumbnail_file"   : thumb_file,
+                "title"            : part_title,
+                "description"      : part_desc,
+                "blocked_countries": [],
+                "allowed_countries": [],
+            })
+
+            if upload_result and \
+               upload_result.get("success"):
+                print(
+                    f"   ✅ Part {part_num}: "
+                    f"{upload_result['url']}"
+                )
+                success_count += 1
+            else:
+                print(f"   ❌ Part {part_num} failed")
+
+            if part_video and os.path.exists(part_video):
+                os.remove(part_video)
+
+            if part_num < num_parts:
+                wait = random.randint(30, 60)
+                print(f"\n⏳ Waiting {wait}s...")
+                time.sleep(wait)
+
+        for f in [audio_file, modified_audio]:
+            if f and f != audio_file and \
+               os.path.exists(f):
+                try:
+                    os.remove(f)
+                except Exception:
+                    pass
+
+        if success_count > 0:
+            self.db.mark_video_uploaded(vid_id, {
+                "title"   : ai_title,
+                "parts"   : num_parts,
+                "uploaded": success_count,
+                "duration": duration,
+            })
+            print(
+                f"\n✅ Done! "
+                f"{success_count}/{num_parts} parts uploaded"
+            )
+            return True
+
+        print(f"\n❌ All parts failed")
+        return False
+
+    def status(self):
+        s = self.db.get_statistics()
+        print(
+            f"\n📊 Uploads: "
+            f"{s.get('total_uploads', 0)}"
+        )
+
+    def auth_only(self):
+        self.auth.authenticate()
+        print(
+            f"✅ Target: "
+            f"{self.auth.get_target_channel_id()}"
+        )
+
+
+# ─────────────────────────────────────────────────────────
+# Entry Point
+# ─────────────────────────────────────────────────────────
+def main():
+    tool    = YouTubeAutomation()
+    command = sys.argv[1] if len(sys.argv) > 1 else "run"
+
+    if command == "run":
+        video_id    = os.environ.get("VIDEO_ID",    "")
+        video_url   = os.environ.get("VIDEO_URL",   "")
+        video_title = os.environ.get(
+            "VIDEO_TITLE", "Relaxing Video"
+        )
+
+        if not video_id or not video_url:
+            print("❌ VIDEO_ID and VIDEO_URL required!")
+            sys.exit(1)
+
+        print(f"\n🎯 New Video Detected")
+        print(f"   Title : {video_title}")
+        print(f"   ID    : {video_id}")
+
+        if tool.setup():
+            tool.process_video({
+                "video_id": video_id,
+                "url"     : video_url,
+                "title"   : video_title,
+            })
+
+    elif command == "status":
+        tool.status()
+
+    elif command == "auth":
+        tool.auth_only()
+
+    else:
+        print("Commands:")
+        print("  python main.py run")
+        print("  python main.py status")
+        print("  python main.py auth")
+
+
+if __name__ == "__main__":
+    main()
