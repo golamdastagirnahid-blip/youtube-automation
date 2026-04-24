@@ -42,11 +42,11 @@ jobs:
       - name: Install Dependencies
         shell: powershell
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -U yt-dlp
-          python -m pip install -r requirements.txt
+          C:\Python312\python.exe -m pip install --upgrade pip
+          C:\Python312\python.exe -m pip install -U yt-dlp
+          C:\Python312\python.exe -m pip install -r requirements.txt
           Write-Host "✅ Dependencies ready"
-          python -m yt_dlp --version
+          C:\Python312\python.exe -m yt_dlp --version
 
       - name: Create Credentials
         shell: powershell
@@ -106,7 +106,7 @@ jobs:
         shell: powershell
         run: |
           Write-Host "🧪 Testing YouTube access..."
-          python -m yt_dlp `
+          C:\Python312\python.exe -m yt_dlp `
             --skip-download `
             --print duration_string `
             "${{ env.VIDEO_URL }}"
@@ -118,7 +118,7 @@ jobs:
 
       - name: Run Automation
         shell: powershell
-        run: python main.py run
+        run: C:\Python312\python.exe main.py run
         env:
           VIDEO_ID:           ${{ env.VIDEO_ID }}
           VIDEO_URL:          ${{ env.VIDEO_URL }}
@@ -133,7 +133,7 @@ jobs:
           git config user.name  "automation-bot"
           git config user.email "bot@github.com"
           git add database.json
-          $diff = git diff --staged --quiet
+          git diff --staged --quiet
           if ($LASTEXITCODE -ne 0) {
             git commit -m "Update DB [skip ci]"
             git push
