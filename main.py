@@ -153,11 +153,13 @@ class YouTubeAutomation:
     # ─────────────────────────────────────────────
     def get_video_info(self, video_url):
         """
+        Get video duration and check if live.
+        Uses process=False to skip format checking.
         Returns:
-            duration in seconds
-            -1 if live video
-            -2 if upcoming/premiere
-             0 if error
+            duration in seconds  → normal video
+            -1                   → live video
+            -2                   → upcoming/premiere
+             0                   → error
         """
         try:
             import yt_dlp
@@ -167,44 +169,60 @@ class YouTubeAutomation:
                 'no_warnings'  : True,
                 'skip_download': True,
                 'cookiefile'   : COOKIES_FILE,
+                'format'       : None,
+                'ignore_errors': True,
+                'noplaylist'   : True,
             }
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(
                     video_url,
-                    download=False
+                    download = False,
+                    process  = False
                 )
 
+                if not info:
+                    print(f"   ⚠️ No info returned")
+                    return 0
+
                 # ── Check live status ──────────────
-                is_live    = info.get('is_live', False)
+                is_live     = info.get('is_live', False)
                 live_status = info.get('live_status', '')
 
                 if is_live:
-                    print(f"   🔴 Currently LIVE — skipping")
-                    return -1
-
-                if live_status == 'is_live':
                     print(f"   🔴 Live stream — skipping")
                     return -1
 
+                if live_status == 'is_live':
+                    print(f"   🔴 Live — skipping")
+                    return -1
+
                 if live_status == 'is_upcoming':
-                    print(f"   📅 Upcoming/Premiere — skipping")
+                    print(f"   📅 Upcoming — skipping")
                     return -2
 
                 if live_status == 'post_live':
-                    print(f"   📺 Post-live stream — skipping")
+                    print(f"   📺 Post-live — skipping")
                     return -1
 
                 # ── Get duration ───────────────────
                 duration = info.get('duration', 0)
 
                 if not duration or duration == 0:
-                    print(f"   ⚠️ No duration found")
+                    print(f"   ⚠️ No duration in metadata")
                     return 0
 
+                print(
+                    f"   ✅ Duration: "
+                    f"{self.format_duration(duration)}"
+                )
                 return duration
 
         except Exception as e:
+            err = str(e)
+            if 'live' in err.lower():
+                print(f"   🔴 Live stream — skipping")
+                return -1
             print(f"⚠️ Video info error: {e}")
             return 0
 
@@ -233,7 +251,7 @@ class YouTubeAutomation:
         print(f"\n⏱️ Checking video info...")
         duration = self.get_video_info(video_url)
 
-        # Skip live videos
+        # Skip live
         if duration == -1:
             print(f"⏭️ Skipping live video")
             self.db.mark_video_uploaded(vid_id, {
@@ -251,8 +269,6 @@ class YouTubeAutomation:
         if duration == 0:
             print(f"⚠️ No duration — skipping")
             return False
-
-        print(f"   ✅ Duration: {self.format_duration(duration)}")
 
         # Skip if too short
         if duration < MIN_DURATION_SECONDS:
@@ -428,7 +444,7 @@ class YouTubeAutomation:
                 print(f"\n⏳ Waiting {wait}s...")
                 time.sleep(wait)
 
-        # ── Cleanup audio files ────────────────────
+        # ── Cleanup audio ──────────────────────────
         for f in [audio_file, modified_audio]:
             if f and os.path.exists(f):
                 try:
