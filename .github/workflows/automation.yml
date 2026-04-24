@@ -81,12 +81,17 @@ jobs:
           restore-keys: db-v1
 
       # ── Step 6: Create Credentials ───────────────
-      - name: Create Credentials
+      - name: Test YouTube Access
         run: |
-          echo '${{ secrets.CLIENT_SECRETS }}' > client_secrets.json
-          echo '${{ secrets.YOUTUBE_TOKEN }}'  > token.json
-          printf '%s' '${{ secrets.COOKIES_TXT }}' > cookies.txt
-          echo "✅ Credentials created"
+          echo "🧪 Testing YouTube access with cookies..."
+          yt-dlp \
+            --cookies cookies.txt \
+            --extractor-args "youtube:player_client=android" \
+            --skip-download \
+            --print duration_string \
+            "https://www.youtube.com/watch?v=Nyn6xm5l6vs" \
+            && echo "✅ SUCCESS - Video accessible!" \
+            || echo "❌ FAILED - Cannot access video"
 
       # ── Step 7: Verify Files ─────────────────────
       - name: Verify Files
