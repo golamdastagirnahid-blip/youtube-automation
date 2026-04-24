@@ -50,6 +50,13 @@ jobs:
           sudo apt-get install -y ffmpeg
           echo "✅ FFmpeg ready"
 
+      - name: Install Node.js
+        run: |
+          curl -fsSL https://deb.nodesource.com/setup_20.x \
+            | sudo -E bash -
+          sudo apt-get install -y nodejs
+          echo "✅ Node.js: $(node --version)"
+
       - name: Install Dependencies
         run: |
           pip install --upgrade pip
@@ -85,7 +92,8 @@ jobs:
             echo "✅ token.json" || \
             echo "❌ token.json missing"
           if [ ! -f database.json ]; then
-            echo '{"uploaded_videos":[],"daily_counts":{},"statistics":{"total_uploads":0},"queued":[]}' > database.json
+            echo '{"uploaded_videos":[],"daily_counts":{},"statistics":{"total_uploads":0},"queued":[]}' \
+              > database.json
             echo "✅ database.json created"
           else
             echo "✅ database.json found"
@@ -130,8 +138,9 @@ jobs:
 
       - name: Test YouTube Access
         run: |
-          echo "🧪 Testing YouTube access with PO Token..."
+          echo "🧪 Testing YouTube access..."
           yt-dlp \
+            --cookies cookies.txt \
             --extractor-args "youtube:player_client=web" \
             --extractor-args "youtube:po_token=web+${{ secrets.PO_TOKEN }}" \
             --extractor-args "youtube:visitor_data=${{ secrets.VISITOR_DATA }}" \
@@ -139,7 +148,16 @@ jobs:
             --print duration_string \
             "${{ env.VIDEO_URL }}" \
             && echo "✅ SUCCESS!" \
-            || echo "⚠️ Test failed"
+            || echo "⚠️ Test failed - trying android..."
+
+          yt-dlp \
+            --cookies cookies.txt \
+            --extractor-args "youtube:player_client=android" \
+            --skip-download \
+            --print duration_string \
+            "${{ env.VIDEO_URL }}" \
+            && echo "✅ Android SUCCESS!" \
+            || echo "⚠️ Android also failed"
 
       - name: Run Automation
         run: python main.py run
