@@ -1,5 +1,6 @@
 """
 YouTube Automation - Main Entry Point
+Handles sleep/relax content channels
 """
 
 import os
@@ -10,6 +11,9 @@ import random
 from datetime import datetime
 
 
+# ─────────────────────────────────────────────────────────
+# Database Class
+# ─────────────────────────────────────────────────────────
 class Database:
 
     def __init__(self):
@@ -29,7 +33,9 @@ class Database:
                 if "daily_counts" not in data:
                     data["daily_counts"] = {}
                 if "statistics" not in data:
-                    data["statistics"] = {"total_uploads": 0}
+                    data["statistics"] = {
+                        "total_uploads": 0
+                    }
                 if "queued" not in data:
                     data["queued"] = []
                 return data
@@ -65,10 +71,14 @@ class Database:
 
     def get_statistics(self):
         return self.data.get(
-            "statistics", {"total_uploads": 0}
+            "statistics",
+            {"total_uploads": 0}
         )
 
 
+# ─────────────────────────────────────────────────────────
+# Imports
+# ─────────────────────────────────────────────────────────
 from src.auth                import YouTubeAuth
 from src.downloader          import VideoDownloader
 from src.uploader            import VideoUploader
@@ -77,12 +87,18 @@ from src.ai_generator        import AIGenerator
 from src.thumbnail_generator import ThumbnailGenerator
 
 
+# ─────────────────────────────────────────────────────────
+# Constants
+# ─────────────────────────────────────────────────────────
 BASE_DIR             = os.path.dirname(os.path.abspath(__file__))
 MIN_DURATION_SECONDS = 60  * 60
 MAX_PART_SECONDS     = 4   * 60 * 60
 MAX_DURATION_SECONDS = 24  * 60 * 60
 
 
+# ─────────────────────────────────────────────────────────
+# Main Class
+# ─────────────────────────────────────────────────────────
 class YouTubeAutomation:
 
     def __init__(self):
@@ -95,6 +111,9 @@ class YouTubeAutomation:
         self.youtube    = None
         self.uploader   = None
 
+    # ─────────────────────────────────────────────
+    # Setup
+    # ─────────────────────────────────────────────
     def setup(self):
         print("=" * 60)
         print("🎬 YouTube Automation")
@@ -114,52 +133,65 @@ class YouTubeAutomation:
         print(f"✅ Target channel: {target_id}")
         return True
 
+    # ─────────────────────────────────────────────
+    # Format Duration
+    # ─────────────────────────────────────────────
     def format_duration(self, seconds):
         hours   = int(seconds // 3600)
         minutes = int((seconds % 3600) // 60)
         return f"{hours}h {minutes}m"
 
+    # ─────────────────────────────────────────────
+    # Get Video Info
+    # ─────────────────────────────────────────────
     def get_video_info(self, video_url):
         """
-        Get video duration using YouTube RSS/oEmbed
-        No cookies needed for public videos
+        Get duration using PO Token.
         Returns:
             duration → normal video
-            -1       → live video
+            -1       → live
             -2       → upcoming
              0       → error
         """
-        import yt_dlp
-
-        # ── Method 1: Use oEmbed API (No auth needed)
         try:
-            import requests
-            video_id = video_url.split("v=")[-1].split("&")[0]
+            import yt_dlp
 
-            # YouTube oEmbed gives basic info
-            oembed_url = (
-                f"https://www.youtube.com/oembed"
-                f"?url={video_url}&format=json"
+            po_token     = os.environ.get("PO_TOKEN",     "")
+            visitor_data = os.environ.get("VISITOR_DATA", "")
+
+            print(
+                f"   🔑 PO Token : "
+                f"{'✅ Found' if po_token else '❌ Missing'}"
             )
-            r = requests.get(oembed_url, timeout=10)
-            if r.status_code != 200:
-                print(f"   ⚠️ oEmbed failed: {r.status_code}")
-        except Exception:
-            pass
+            print(
+                f"   🔑 Visitor  : "
+                f"{'✅ Found' if visitor_data else '❌ Missing'}"
+            )
 
-        # ── Method 2: yt-dlp with android client ──
-        try:
+            # Build extractor args
+            extractor_args = {
+                'youtube': {
+                    'player_client': ['web'],
+                }
+            }
+
+            if po_token:
+                extractor_args['youtube']['po_token'] = [
+                    f'web+{po_token}'
+                ]
+
+            if visitor_data:
+                extractor_args['youtube']['visitor_data'] = [
+                    visitor_data
+                ]
+
             ydl_opts = {
                 'quiet'          : True,
                 'no_warnings'    : True,
                 'skip_download'  : True,
                 'format'         : None,
                 'noplaylist'     : True,
-                'extractor_args' : {
-                    'youtube': {
-                        'player_client': ['android'],
-                    }
-                },
+                'extractor_args' : extractor_args,
             }
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -170,13 +202,15 @@ class YouTubeAutomation:
                 )
 
                 if not info:
+                    print(f"   ⚠️ No info returned")
                     return 0
 
+                # Check live status
                 is_live     = info.get('is_live', False)
                 live_status = info.get('live_status', '')
 
                 if is_live or live_status == 'is_live':
-                    print(f"   🔴 Live — skipping")
+                    print(f"   🔴 Live stream — skipping")
                     return -1
 
                 if live_status == 'is_upcoming':
@@ -189,7 +223,8 @@ class YouTubeAutomation:
 
                 duration = info.get('duration', 0)
 
-                if not duration:
+                if not duration or duration == 0:
+                    print(f"   ⚠️ No duration found")
                     return 0
 
                 print(
@@ -201,64 +236,20 @@ class YouTubeAutomation:
         except Exception as e:
             err = str(e)
             if 'live' in err.lower():
+                print(f"   🔴 Live — skipping")
                 return -1
-            print(f"⚠️ Method 2 failed: {e}")
-
-        # ── Method 3: iOS client ───────────────────
-        try:
-            ydl_opts = {
-                'quiet'          : True,
-                'no_warnings'    : True,
-                'skip_download'  : True,
-                'format'         : None,
-                'noplaylist'     : True,
-                'extractor_args' : {
-                    'youtube': {
-                        'player_client': ['ios'],
-                    }
-                },
-            }
-
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(
-                    video_url,
-                    download = False,
-                    process  = False
-                )
-
-                if not info:
-                    return 0
-
-                is_live     = info.get('is_live', False)
-                live_status = info.get('live_status', '')
-
-                if is_live or live_status == 'is_live':
-                    print(f"   🔴 Live — skipping")
-                    return -1
-
-                if live_status == 'is_upcoming':
-                    print(f"   📅 Upcoming — skipping")
-                    return -2
-
-                duration = info.get('duration', 0)
-
-                if not duration:
-                    return 0
-
-                print(
-                    f"   ✅ Duration: "
-                    f"{self.format_duration(duration)}"
-                )
-                return duration
-
-        except Exception as e:
-            print(f"⚠️ Method 3 failed: {e}")
+            print(f"⚠️ Info error: {e}")
             return 0
 
+    # ─────────────────────────────────────────────
+    # Process Single Video
+    # ─────────────────────────────────────────────
     def process_video(self, video_info):
         vid_id    = video_info.get("video_id")
         video_url = video_info.get("url")
-        title     = video_info.get("title", "Relaxing Video")
+        title     = video_info.get(
+            "title", "Relaxing Video"
+        )
 
         print(f"\n{'='*60}")
         print(f"🎬 Processing: {title}")
@@ -266,10 +257,12 @@ class YouTubeAutomation:
         print(f"   URL : {video_url}")
         print(f"{'='*60}")
 
+        # Already uploaded?
         if self.db.is_video_uploaded(vid_id):
             print(f"⏭️ Already uploaded: {vid_id}")
             return False
 
+        # Get video info
         print(f"\n⏱️ Checking video info...")
         duration = self.get_video_info(video_url)
 
@@ -301,6 +294,7 @@ class YouTubeAutomation:
             })
             return False
 
+        # Download audio
         print(f"\n📥 Downloading audio...")
         audio_file = self.downloader.download_audio(
             video_url, vid_id
@@ -312,23 +306,29 @@ class YouTubeAutomation:
 
         print(f"   ✅ Audio: {audio_file}")
 
+        # Modify audio
         print(f"\n🔊 Modifying audio...")
         modified_audio = self.processor.modify_audio(
             audio_file, vid_id
         )
         print(f"   ✅ Modified: {modified_audio}")
 
+        # AI metadata
         print(f"\n🤖 Generating AI metadata...")
         ai_title, ai_desc = self.ai.generate_metadata(title)
         print(f"   ✅ Title: {ai_title}")
 
+        # Calculate parts
         num_parts = max(
             1,
             -(-int(duration) // MAX_PART_SECONDS)
         )
 
         print(f"\n📊 Split plan:")
-        print(f"   Duration: {self.format_duration(duration)}")
+        print(
+            f"   Duration: "
+            f"{self.format_duration(duration)}"
+        )
         print(f"   Parts   : {num_parts}")
 
         success_count = 0
@@ -352,14 +352,19 @@ class YouTubeAutomation:
                 f"{self.format_duration(end_sec)}"
             )
 
+            # Generate thumbnail
             print(f"\n🖼️ Generating thumbnail...")
             thumb_file = self.thumb_gen.generate(
                 title    = ai_title,
                 part_num = part_num if num_parts > 1
                            else None,
-                duration = self.format_duration(part_duration)
+                duration = self.format_duration(
+                    part_duration
+                )
             )
+            print(f"   ✅ Thumbnail: {thumb_file}")
 
+            # Create video
             print(f"\n🎥 Creating video...")
             part_video = self.processor\
                 .create_image_audio_video(
@@ -374,6 +379,9 @@ class YouTubeAutomation:
                 print(f"❌ Failed to create part {part_num}")
                 continue
 
+            print(f"   ✅ Video: {part_video}")
+
+            # Build title
             if num_parts > 1:
                 part_title = (
                     f"{ai_title} "
@@ -382,6 +390,7 @@ class YouTubeAutomation:
             else:
                 part_title = ai_title
 
+            # Build description
             part_desc = (
                 f"{ai_desc}\n\n"
                 f"⏱️ Duration: "
@@ -407,10 +416,13 @@ class YouTubeAutomation:
                 f"#rainsounds #whitenoise"
             )
 
+            # Upload
             print(f"\n📤 Uploading Part {part_num}...")
 
             upload_result = self.uploader.upload_video({
-                "video_id"         : f"{vid_id}_part{part_num}",
+                "video_id"         : (
+                    f"{vid_id}_part{part_num}"
+                ),
                 "video_file"       : part_video,
                 "thumbnail_file"   : thumb_file,
                 "title"            : part_title,
@@ -419,7 +431,8 @@ class YouTubeAutomation:
                 "allowed_countries": [],
             })
 
-            if upload_result and upload_result.get("success"):
+            if upload_result and \
+               upload_result.get("success"):
                 print(
                     f"   ✅ Part {part_num}: "
                     f"{upload_result['url']}"
@@ -428,17 +441,20 @@ class YouTubeAutomation:
             else:
                 print(f"   ❌ Part {part_num} failed")
 
+            # Cleanup
             if part_video and os.path.exists(part_video):
                 try:
                     os.remove(part_video)
                 except Exception:
                     pass
 
+            # Wait between parts
             if part_num < num_parts:
                 wait = random.randint(30, 60)
                 print(f"\n⏳ Waiting {wait}s...")
                 time.sleep(wait)
 
+        # Cleanup audio
         for f in [audio_file, modified_audio]:
             if f and os.path.exists(f):
                 try:
@@ -446,6 +462,7 @@ class YouTubeAutomation:
                 except Exception:
                     pass
 
+        # Save to database
         if success_count > 0:
             self.db.mark_video_uploaded(vid_id, {
                 "title"   : ai_title,
@@ -464,7 +481,10 @@ class YouTubeAutomation:
 
     def status(self):
         s = self.db.get_statistics()
-        print(f"\n📊 Uploads: {s.get('total_uploads', 0)}")
+        print(
+            f"\n📊 Uploads: "
+            f"{s.get('total_uploads', 0)}"
+        )
 
     def auth_only(self):
         self.auth.authenticate()
@@ -474,6 +494,9 @@ class YouTubeAutomation:
         )
 
 
+# ─────────────────────────────────────────────────────────
+# Entry Point
+# ─────────────────────────────────────────────────────────
 def main():
     tool    = YouTubeAutomation()
     command = sys.argv[1] if len(sys.argv) > 1 else "run"
