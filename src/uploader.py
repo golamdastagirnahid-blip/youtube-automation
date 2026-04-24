@@ -7,7 +7,7 @@ from src.config              import (
 )
 from src.database            import Database
 from src.title_generator     import TitleGenerator
-from src.thumbnail_editor import ThumbnailGenerator as ThumbnailEditor
+from src.thumbnail_generator import ThumbnailGenerator as ThumbnailEditor
 
 
 class VideoUploader:
