@@ -31,40 +31,25 @@ jobs:
 
     steps:
 
-      # ── Step 1: Checkout ────────────────────────
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          token:      ${{ secrets.GH_TOKEN }}
-          clean:      true
-          fetch-depth: 0
+          token:       ${{ secrets.GH_TOKEN }}
+          clean:       true
+          fetch-depth: 1
+          ref:         main
 
-      # ── Step 1b: Verify Checkout ─────────────────
-      - name: Verify Checkout
-        run: |
-          echo "📄 main.py line 21:"
-          sed -n '21p' main.py
-          echo ""
-          echo "📄 main.py first 10 lines:"
-          head -10 main.py
-          echo ""
-          echo "📄 src/database.py first 5 lines:"
-          head -5 src/database.py
-
-      # ── Step 2: Setup Python ────────────────────
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      # ── Step 3: Install FFmpeg ───────────────────
       - name: Install FFmpeg
         run: |
           sudo apt-get update -y
           sudo apt-get install -y ffmpeg
-          echo "✅ FFmpeg: $(ffmpeg -version | head -1)"
+          echo "✅ FFmpeg ready"
 
-      # ── Step 4: Install Dependencies ────────────
       - name: Install Dependencies
         run: |
           pip install --upgrade pip
@@ -72,7 +57,6 @@ jobs:
           pip install -U yt-dlp
           echo "✅ yt-dlp: $(yt-dlp --version)"
 
-      # ── Step 5: Restore Database ─────────────────
       - name: Restore Database
         uses: actions/cache@v4
         with:
@@ -80,52 +64,33 @@ jobs:
           key: db-v1
           restore-keys: db-v1
 
-      # ── Step 6: Create Credentials ───────────────
-      - name: Test YouTube Access
+      - name: Create Credentials
         run: |
-          echo "🧪 Testing YouTube access with cookies..."
-          yt-dlp \
-            --cookies cookies.txt \
-            --extractor-args "youtube:player_client=android" \
-            --skip-download \
-            --print duration_string \
-            "https://www.youtube.com/watch?v=Nyn6xm5l6vs" \
-            && echo "✅ SUCCESS - Video accessible!" \
-            || echo "❌ FAILED - Cannot access video"
+          echo '${{ secrets.CLIENT_SECRETS }}' > client_secrets.json
+          echo '${{ secrets.YOUTUBE_TOKEN }}'  > token.json
+          printf '%s' '${{ secrets.COOKIES_TXT }}' > cookies.txt
+          echo "✅ Credentials created"
+          echo "📄 Cookies: $(wc -l < cookies.txt) lines"
 
-      # ── Step 7: Verify Files ─────────────────────
       - name: Verify Files
         run: |
           echo "📁 Checking files..."
-          if [ -f cookies.txt ]; then
-            echo "✅ cookies.txt ($(wc -c < cookies.txt) bytes)"
-          else
+          [ -f cookies.txt ] && \
+            echo "✅ cookies.txt ($(wc -c < cookies.txt) bytes)" || \
             echo "❌ cookies.txt missing"
-          fi
-          if [ -f client_secrets.json ]; then
-            echo "✅ client_secrets.json found"
-          else
+          [ -f client_secrets.json ] && \
+            echo "✅ client_secrets.json" || \
             echo "❌ client_secrets.json missing"
-          fi
-          if [ -f token.json ]; then
-            echo "✅ token.json found"
-          else
+          [ -f token.json ] && \
+            echo "✅ token.json" || \
             echo "❌ token.json missing"
-          fi
-          if [ -f database.json ]; then
-            echo "✅ database.json found"
-          else
-            echo "⚠️ Creating database.json..."
-            echo '{
-              "uploaded_videos": [],
-              "daily_counts": {},
-              "statistics": {"total_uploads": 0},
-              "queued": []
-            }' > database.json
+          if [ ! -f database.json ]; then
+            echo '{"uploaded_videos":[],"daily_counts":{},"statistics":{"total_uploads":0},"queued":[]}' > database.json
             echo "✅ database.json created"
+          else
+            echo "✅ database.json found"
           fi
 
-      # ── Step 8: Set Variables ────────────────────
       - name: Set Variables
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -139,35 +104,43 @@ jobs:
             VIDEO_TITLE="${{ github.event.client_payload.video_title }}"
             VIDEO_PRIVACY="${{ github.event.client_payload.video_privacy }}"
           fi
-
           [ -z "$VIDEO_PRIVACY" ] && VIDEO_PRIVACY="public"
           [ -z "$VIDEO_TITLE"   ] && VIDEO_TITLE="Relaxing Video"
-
           echo "VIDEO_ID=$VIDEO_ID"           >> $GITHUB_ENV
           echo "VIDEO_URL=$VIDEO_URL"         >> $GITHUB_ENV
           echo "VIDEO_TITLE=$VIDEO_TITLE"     >> $GITHUB_ENV
           echo "VIDEO_PRIVACY=$VIDEO_PRIVACY" >> $GITHUB_ENV
 
-      # ── Step 9: Show Video Info ──────────────────
       - name: Show Video Info
         run: |
           echo "============================================"
           echo "🎬 Video Information"
-          echo "   ID      : ${{ env.VIDEO_ID }}"
-          echo "   URL     : ${{ env.VIDEO_URL }}"
-          echo "   Title   : ${{ env.VIDEO_TITLE }}"
-          echo "   Privacy : ${{ env.VIDEO_PRIVACY }}"
+          echo "   ID     : ${{ env.VIDEO_ID }}"
+          echo "   URL    : ${{ env.VIDEO_URL }}"
+          echo "   Title  : ${{ env.VIDEO_TITLE }}"
+          echo "   Privacy: ${{ env.VIDEO_PRIVACY }}"
           echo "============================================"
 
-      # ── Step 10: Check Disk Space ────────────────
       - name: Check Disk Space
         run: |
-          echo "💾 Disk space:"
+          echo "💾 Disk:"
           df -h
           echo "📦 RAM:"
           free -h
 
-      # ── Step 11: Run Automation ──────────────────
+      - name: Test YouTube Access
+        run: |
+          echo "🧪 Testing YouTube access with PO Token..."
+          yt-dlp \
+            --extractor-args "youtube:player_client=web" \
+            --extractor-args "youtube:po_token=web+${{ secrets.PO_TOKEN }}" \
+            --extractor-args "youtube:visitor_data=${{ secrets.VISITOR_DATA }}" \
+            --skip-download \
+            --print duration_string \
+            "${{ env.VIDEO_URL }}" \
+            && echo "✅ SUCCESS!" \
+            || echo "⚠️ Test failed"
+
       - name: Run Automation
         run: python main.py run
         env:
@@ -176,8 +149,9 @@ jobs:
           VIDEO_TITLE:        ${{ env.VIDEO_TITLE }}
           VIDEO_PRIVACY:      ${{ env.VIDEO_PRIVACY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          PO_TOKEN:           ${{ secrets.PO_TOKEN }}
+          VISITOR_DATA:       ${{ secrets.VISITOR_DATA }}
 
-      # ── Step 12: Save Database ───────────────────
       - name: Save Database
         if: always()
         run: |
@@ -188,11 +162,9 @@ jobs:
             git commit -m "Update DB [skip ci]"
           git push || true
 
-      # ── Step 13: Cleanup ─────────────────────────
       - name: Cleanup
         if: always()
         run: |
-          echo "🧹 Cleaning up..."
           rm -rf downloads/  || true
           rm -rf processed/  || true
           rm -rf thumbnails/ || true
