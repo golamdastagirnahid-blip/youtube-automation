@@ -100,18 +100,36 @@ MAX_DURATION_SECONDS = 24  * 60 * 60
 # ─────────────────────────────────────────────────────────
 # Proxy Helper
 # ─────────────────────────────────────────────────────────
-def get_proxy():
-    """Get working BD/IN proxy from proxifly"""
-    sources = [
-        "https://raw.githubusercontent.com/proxifly/"
-        "free-proxy-list/main/proxies/countries/BD/data.txt",
-        "https://raw.githubusercontent.com/proxifly/"
-        "free-proxy-list/main/proxies/countries/IN/data.txt",
-    ]
-
+def load_all_proxies():
+    """Load proxies from ALL countries"""
     all_proxies = []
-    for url in sources:
+
+    # Main full list first
+    try:
+        r = requests.get(
+            "https://raw.githubusercontent.com/proxifly/"
+            "free-proxy-list/main/proxies/all/data.txt",
+            timeout=15
+        )
+        if r.status_code == 200:
+            lines = [
+                l.strip()
+                for l in r.text.splitlines()
+                if l.strip() and not l.startswith('#')
+            ]
+            all_proxies.extend(lines)
+            print(f"   ✅ Main list: {len(lines)} proxies")
+    except Exception as e:
+        print(f"   ⚠️ Main list error: {e}")
+
+    # Priority country lists
+    for country in ["BD", "IN", "SG", "ID", "PH", "VN"]:
         try:
+            url = (
+                f"https://raw.githubusercontent.com/"
+                f"proxifly/free-proxy-list/main/"
+                f"proxies/countries/{country}/data.txt"
+            )
             r = requests.get(url, timeout=10)
             if r.status_code == 200:
                 lines = [
@@ -124,27 +142,18 @@ def get_proxy():
             continue
 
     random.shuffle(all_proxies)
-    print(f"   📦 Loaded {len(all_proxies)} BD/IN proxies")
+    print(f"   📦 Total proxies: {len(all_proxies)}")
+    return all_proxies
 
-    # Test proxies
-    for p in all_proxies[:20]:
-        proxy = f"http://{p}" if not p.startswith('http') \
-                else p
-        try:
-            r = requests.get(
-                "https://www.youtube.com",
-                proxies={"http": proxy, "https": proxy},
-                timeout=5,
-                headers={"User-Agent": "Mozilla/5.0"}
-            )
-            if r.status_code in (200, 403):
-                print(f"   ✅ Proxy: {proxy}")
-                return proxy
-        except Exception:
-            continue
 
-    print(f"   ⚠️ No working proxy found")
-    return None
+def format_proxy(proxy):
+    """Format proxy URL correctly"""
+    if not proxy:
+        return None
+    if proxy.startswith('http') or \
+       proxy.startswith('socks'):
+        return proxy
+    return f"http://{proxy}"
 
 
 # ─────────────────────────────────────────────────────────
@@ -193,11 +202,11 @@ class YouTubeAutomation:
         return f"{hours}h {minutes}m"
 
     # ─────────────────────────────────────────────
-    # Get Video Info Using Proxy
+    # Get Video Info
     # ─────────────────────────────────────────────
     def get_video_info(self, video_url):
         """
-        Get duration using BD/IN proxy.
+        Get duration using worldwide proxies.
         Returns:
             duration → normal video
             -1       → live
@@ -206,71 +215,70 @@ class YouTubeAutomation:
         """
         import yt_dlp
 
-        print(f"   🔄 Getting proxy for info check...")
-        proxy = get_proxy()
+        print(f"   🌍 Loading proxies...")
+        all_proxies = load_all_proxies()
 
-        ydl_opts = {
-            'quiet'          : True,
-            'no_warnings'    : True,
-            'skip_download'  : True,
-            'format'         : None,
-            'noplaylist'     : True,
-            'extractor_args' : {
-                'youtube': {
-                    'player_client': ['android'],
-                }
-            },
-        }
+        for i, raw_proxy in enumerate(all_proxies[:20], 1):
+            proxy = format_proxy(raw_proxy)
+            print(f"   🔄 [{i}/20] {proxy}")
 
-        if proxy:
-            ydl_opts['proxy'] = proxy
+            ydl_opts = {
+                'quiet'          : True,
+                'no_warnings'    : True,
+                'skip_download'  : True,
+                'format'         : None,
+                'noplaylist'     : True,
+                'proxy'          : proxy,
+                'socket_timeout' : 15,
+                'extractor_args' : {
+                    'youtube': {
+                        'player_client': ['android'],
+                    }
+                },
+            }
 
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(
-                    video_url,
-                    download = False,
-                    process  = False
-                )
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(
+                        video_url,
+                        download = False,
+                        process  = False
+                    )
 
-                if not info:
-                    print(f"   ⚠️ No info returned")
-                    return 0
+                    if not info:
+                        continue
 
-                # Check live
-                is_live     = info.get('is_live', False)
-                live_status = info.get('live_status', '')
+                    is_live     = info.get('is_live', False)
+                    live_status = info.get('live_status', '')
 
-                if is_live or live_status == 'is_live':
-                    print(f"   🔴 Live — skipping")
+                    if is_live or live_status == 'is_live':
+                        print(f"   🔴 Live — skipping")
+                        return -1
+
+                    if live_status == 'is_upcoming':
+                        print(f"   📅 Upcoming — skipping")
+                        return -2
+
+                    if live_status == 'post_live':
+                        print(f"   📺 Post-live — skipping")
+                        return -1
+
+                    duration = info.get('duration', 0)
+                    if duration and duration > 0:
+                        print(
+                            f"   ✅ Duration: "
+                            f"{self.format_duration(duration)}"
+                        )
+                        return duration
+
+            except Exception as e:
+                err = str(e)
+                if 'live' in err.lower():
                     return -1
+                continue
 
-                if live_status == 'is_upcoming':
-                    print(f"   📅 Upcoming — skipping")
-                    return -2
-
-                if live_status == 'post_live':
-                    print(f"   📺 Post-live — skipping")
-                    return -1
-
-                duration = info.get('duration', 0)
-
-                if not duration or duration == 0:
-                    print(f"   ⚠️ No duration")
-                    return 0
-
-                print(
-                    f"   ✅ Duration: "
-                    f"{self.format_duration(duration)}"
-                )
-                return duration
-
-        except Exception as e:
-            err = str(e)
-            if 'live' in err.lower():
-                return -1
-            print(f"⚠️ Info error: {e}")
-            return 0
+        print(f"⚠️ Could not get duration")
+        return 0
 
     # ─────────────────────────────────────────────
     # Process Single Video
