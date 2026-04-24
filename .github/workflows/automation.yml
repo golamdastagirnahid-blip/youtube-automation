@@ -26,12 +26,16 @@ jobs:
   upload:
     runs-on: ubuntu-latest
     timeout-minutes: 360
+    permissions:
+      contents: write
 
     steps:
 
       # ── Step 1: Checkout ────────────────────────
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_TOKEN }}
 
       # ── Step 2: Setup Python ────────────────────
       - name: Setup Python
@@ -74,15 +78,33 @@ jobs:
       - name: Verify Files
         run: |
           echo "📁 Checking files..."
-          [ -f cookies.txt ] && \
-            echo "✅ cookies.txt ($(wc -c < cookies.txt) bytes)" || \
+          if [ -f cookies.txt ]; then
+            echo "✅ cookies.txt ($(wc -c < cookies.txt) bytes)"
+          else
             echo "❌ cookies.txt missing"
-          [ -f client_secrets.json ] && \
-            echo "✅ client_secrets.json" || \
+          fi
+          if [ -f client_secrets.json ]; then
+            echo "✅ client_secrets.json found"
+          else
             echo "❌ client_secrets.json missing"
-          [ -f token.json ] && \
-            echo "✅ token.json" || \
+          fi
+          if [ -f token.json ]; then
+            echo "✅ token.json found"
+          else
             echo "❌ token.json missing"
+          fi
+          if [ -f database.json ]; then
+            echo "✅ database.json found"
+          else
+            echo "⚠️ database.json not found - creating..."
+            echo '{
+              "uploaded_videos": [],
+              "daily_counts": {},
+              "statistics": {"total_uploads": 0},
+              "queued": []
+            }' > database.json
+            echo "✅ database.json created"
+          fi
 
       # ── Step 8: Set Variables ────────────────────
       - name: Set Variables
