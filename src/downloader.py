@@ -1,7 +1,6 @@
 """
 Video Downloader - Audio Only
-Uses Cloudflare WARP VPN (set in workflow)
-No proxy needed - VPN handles IP routing
+Uses OAuth2 authentication - No VPN or cookies needed
 """
 
 import os
@@ -22,8 +21,8 @@ class VideoDownloader:
 
     def download_audio(self, video_url, video_id):
         """
-        Download audio using WARP VPN IP
-        No proxy needed - VPN is active at system level
+        Download audio using OAuth2 token
+        No VPN or cookies needed
         """
         print(f"   🎵 Downloading: {video_id}")
 
@@ -32,8 +31,17 @@ class VideoDownloader:
             f"{video_id}.%(ext)s"
         )
 
-        # Method 1: Android client
-        print(f"   🔄 Method 1: Android client...")
+        # Method 1: OAuth2 (Strongest - acts like a TV app)
+        print(f"   🔄 Method 1: OAuth2...")
+        result = self._try_download(
+            video_url, video_id, output_path,
+            client='oauth2'
+        )
+        if result:
+            return result
+
+        # Method 2: Android client
+        print(f"   🔄 Method 2: Android client...")
         result = self._try_download(
             video_url, video_id, output_path,
             client='android'
@@ -41,8 +49,8 @@ class VideoDownloader:
         if result:
             return result
 
-        # Method 2: iOS client
-        print(f"   🔄 Method 2: iOS client...")
+        # Method 3: iOS client
+        print(f"   🔄 Method 3: iOS client...")
         result = self._try_download(
             video_url, video_id, output_path,
             client='ios'
@@ -50,8 +58,8 @@ class VideoDownloader:
         if result:
             return result
 
-        # Method 3: Web client
-        print(f"   🔄 Method 3: Web client...")
+        # Method 4: Web client
+        print(f"   🔄 Method 4: Web client...")
         result = self._try_download(
             video_url, video_id, output_path,
             client='web'
@@ -64,29 +72,45 @@ class VideoDownloader:
 
     def _try_download(
         self, video_url, video_id,
-        output_path, client='android'
+        output_path, client='oauth2'
     ):
         """Try downloading with specific client"""
         try:
-            ydl_opts = {
-                'format'         : (
-                    'bestaudio[ext=m4a]/bestaudio'
-                ),
-                'outtmpl'        : output_path,
-                'quiet'          : True,
-                'no_warnings'    : True,
-                'cookiefile'     : 'cookies.txt',
-                'socket_timeout' : 30,
-                'extractor_args' : {
-                    'youtube': {
-                        'player_client': [client],
-                    }
-                },
-                'postprocessors' : [{
-                    'key'            : 'FFmpegExtractAudio',
-                    'preferredcodec' : 'm4a',
-                }],
-            }
+            if client == 'oauth2':
+                ydl_opts = {
+                    'format'         : (
+                        'bestaudio[ext=m4a]/bestaudio'
+                    ),
+                    'outtmpl'        : output_path,
+                    'quiet'          : True,
+                    'no_warnings'    : True,
+                    'username'       : 'oauth2',
+                    'password'       : '',
+                    'socket_timeout' : 30,
+                    'postprocessors' : [{
+                        'key'            : 'FFmpegExtractAudio',
+                        'preferredcodec' : 'm4a',
+                    }],
+                }
+            else:
+                ydl_opts = {
+                    'format'         : (
+                        'bestaudio[ext=m4a]/bestaudio'
+                    ),
+                    'outtmpl'        : output_path,
+                    'quiet'          : True,
+                    'no_warnings'    : True,
+                    'socket_timeout' : 30,
+                    'extractor_args' : {
+                        'youtube': {
+                            'player_client': [client],
+                        }
+                    },
+                    'postprocessors' : [{
+                        'key'            : 'FFmpegExtractAudio',
+                        'preferredcodec' : 'm4a',
+                    }],
+                }
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.extract_info(
