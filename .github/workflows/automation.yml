@@ -43,13 +43,20 @@ jobs:
         shell: powershell
         run: |
           C:\Python312\python.exe -m pip install `
-            -U yt-dlp `
-            --quiet
+            -U yt-dlp --quiet
           C:\Python312\python.exe -m pip install `
-            -r requirements.txt `
-            --quiet
-          Write-Host "✅ Dependencies ready"
-          C:\Python312\python.exe -m yt_dlp --version
+            -r requirements.txt --quiet
+          Write-Host "✅ yt-dlp: $(C:\Python312\python.exe -m yt_dlp --version)"
+          Write-Host "✅ Deno: $(deno --version)"
+
+      - name: Setup Cookies
+        shell: powershell
+        run: |
+          '${{ secrets.COOKIES_TXT }}' | `
+            Out-File -FilePath cookies.txt `
+            -Encoding utf8
+          $lines = (Get-Content cookies.txt).Count
+          Write-Host "✅ Cookies ready: $lines lines"
 
       - name: Create Credentials
         shell: powershell
@@ -67,7 +74,8 @@ jobs:
         run: |
           if (-not (Test-Path "database.json")) {
             $db = '{"uploaded_videos":[],"daily_counts":{},"statistics":{"total_uploads":0},"queued":[]}'
-            $db | Out-File -FilePath database.json -Encoding utf8
+            $db | Out-File -FilePath database.json `
+              -Encoding utf8
             Write-Host "✅ database.json created"
           } else {
             Write-Host "✅ database.json exists"
@@ -114,7 +122,13 @@ jobs:
         shell: powershell
         run: |
           Write-Host "🧪 Testing YouTube access..."
+          Write-Host "   Deno PATH check:"
+          $env:PATH = $env:PATH + `
+            ";C:\Users\Administrator\.deno\bin"
+          deno --version
           C:\Python312\python.exe -m yt_dlp `
+            --cookies cookies.txt `
+            --remote-components "ejs:github" `
             --skip-download `
             --print duration_string `
             "${{ env.VIDEO_URL }}"
@@ -127,6 +141,8 @@ jobs:
       - name: Run Automation
         shell: powershell
         run: |
+          $env:PATH = $env:PATH + `
+            ";C:\Users\Administrator\.deno\bin"
           C:\Python312\python.exe main.py run
         env:
           VIDEO_ID:           ${{ env.VIDEO_ID }}
@@ -164,5 +180,7 @@ jobs:
           Remove-Item -Force token.json `
             -ErrorAction SilentlyContinue
           Remove-Item -Force client_secrets.json `
+            -ErrorAction SilentlyContinue
+          Remove-Item -Force cookies.txt `
             -ErrorAction SilentlyContinue
           Write-Host "✅ Cleanup done"
