@@ -8,6 +8,7 @@ import sys
 import json
 import time
 import random
+import requests
 from datetime import datetime
 
 
@@ -97,6 +98,56 @@ MAX_DURATION_SECONDS = 24  * 60 * 60
 
 
 # ─────────────────────────────────────────────────────────
+# Proxy Helper
+# ─────────────────────────────────────────────────────────
+def get_proxy():
+    """Get working BD/IN proxy from proxifly"""
+    sources = [
+        "https://raw.githubusercontent.com/proxifly/"
+        "free-proxy-list/main/proxies/countries/BD/data.txt",
+        "https://raw.githubusercontent.com/proxifly/"
+        "free-proxy-list/main/proxies/countries/IN/data.txt",
+    ]
+
+    all_proxies = []
+    for url in sources:
+        try:
+            r = requests.get(url, timeout=10)
+            if r.status_code == 200:
+                lines = [
+                    l.strip()
+                    for l in r.text.splitlines()
+                    if l.strip() and not l.startswith('#')
+                ]
+                all_proxies.extend(lines)
+        except Exception:
+            continue
+
+    random.shuffle(all_proxies)
+    print(f"   📦 Loaded {len(all_proxies)} BD/IN proxies")
+
+    # Test proxies
+    for p in all_proxies[:20]:
+        proxy = f"http://{p}" if not p.startswith('http') \
+                else p
+        try:
+            r = requests.get(
+                "https://www.youtube.com",
+                proxies={"http": proxy, "https": proxy},
+                timeout=5,
+                headers={"User-Agent": "Mozilla/5.0"}
+            )
+            if r.status_code in (200, 403):
+                print(f"   ✅ Proxy: {proxy}")
+                return proxy
+        except Exception:
+            continue
+
+    print(f"   ⚠️ No working proxy found")
+    return None
+
+
+# ─────────────────────────────────────────────────────────
 # Main Class
 # ─────────────────────────────────────────────────────────
 class YouTubeAutomation:
@@ -142,58 +193,39 @@ class YouTubeAutomation:
         return f"{hours}h {minutes}m"
 
     # ─────────────────────────────────────────────
-    # Get Video Info
+    # Get Video Info Using Proxy
     # ─────────────────────────────────────────────
     def get_video_info(self, video_url):
         """
-        Get duration using PO Token.
+        Get duration using BD/IN proxy.
         Returns:
             duration → normal video
             -1       → live
             -2       → upcoming
              0       → error
         """
-        try:
-            import yt_dlp
+        import yt_dlp
 
-            po_token     = os.environ.get("PO_TOKEN",     "")
-            visitor_data = os.environ.get("VISITOR_DATA", "")
+        print(f"   🔄 Getting proxy for info check...")
+        proxy = get_proxy()
 
-            print(
-                f"   🔑 PO Token : "
-                f"{'✅ Found' if po_token else '❌ Missing'}"
-            )
-            print(
-                f"   🔑 Visitor  : "
-                f"{'✅ Found' if visitor_data else '❌ Missing'}"
-            )
-
-            # Build extractor args
-            extractor_args = {
+        ydl_opts = {
+            'quiet'          : True,
+            'no_warnings'    : True,
+            'skip_download'  : True,
+            'format'         : None,
+            'noplaylist'     : True,
+            'extractor_args' : {
                 'youtube': {
-                    'player_client': ['web'],
+                    'player_client': ['android'],
                 }
-            }
+            },
+        }
 
-            if po_token:
-                extractor_args['youtube']['po_token'] = [
-                    f'web+{po_token}'
-                ]
+        if proxy:
+            ydl_opts['proxy'] = proxy
 
-            if visitor_data:
-                extractor_args['youtube']['visitor_data'] = [
-                    visitor_data
-                ]
-
-            ydl_opts = {
-                'quiet'          : True,
-                'no_warnings'    : True,
-                'skip_download'  : True,
-                'format'         : None,
-                'noplaylist'     : True,
-                'extractor_args' : extractor_args,
-            }
-
+        try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(
                     video_url,
@@ -205,12 +237,12 @@ class YouTubeAutomation:
                     print(f"   ⚠️ No info returned")
                     return 0
 
-                # Check live status
+                # Check live
                 is_live     = info.get('is_live', False)
                 live_status = info.get('live_status', '')
 
                 if is_live or live_status == 'is_live':
-                    print(f"   🔴 Live stream — skipping")
+                    print(f"   🔴 Live — skipping")
                     return -1
 
                 if live_status == 'is_upcoming':
@@ -224,7 +256,7 @@ class YouTubeAutomation:
                 duration = info.get('duration', 0)
 
                 if not duration or duration == 0:
-                    print(f"   ⚠️ No duration found")
+                    print(f"   ⚠️ No duration")
                     return 0
 
                 print(
@@ -236,7 +268,6 @@ class YouTubeAutomation:
         except Exception as e:
             err = str(e)
             if 'live' in err.lower():
-                print(f"   🔴 Live — skipping")
                 return -1
             print(f"⚠️ Info error: {e}")
             return 0
@@ -352,7 +383,7 @@ class YouTubeAutomation:
                 f"{self.format_duration(end_sec)}"
             )
 
-            # Generate thumbnail
+            # Thumbnail
             print(f"\n🖼️ Generating thumbnail...")
             thumb_file = self.thumb_gen.generate(
                 title    = ai_title,
@@ -376,7 +407,7 @@ class YouTubeAutomation:
                 )
 
             if not part_video:
-                print(f"❌ Failed to create part {part_num}")
+                print(f"❌ Failed part {part_num}")
                 continue
 
             print(f"   ✅ Video: {part_video}")
@@ -441,7 +472,7 @@ class YouTubeAutomation:
             else:
                 print(f"   ❌ Part {part_num} failed")
 
-            # Cleanup
+            # Cleanup part video
             if part_video and os.path.exists(part_video):
                 try:
                     os.remove(part_video)
