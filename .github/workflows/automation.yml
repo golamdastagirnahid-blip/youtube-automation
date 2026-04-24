@@ -35,7 +35,21 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GH_TOKEN }}
+          token:      ${{ secrets.GH_TOKEN }}
+          clean:      true
+          fetch-depth: 0
+
+      # ── Step 1b: Verify Checkout ─────────────────
+      - name: Verify Checkout
+        run: |
+          echo "📄 main.py line 21:"
+          sed -n '21p' main.py
+          echo ""
+          echo "📄 main.py first 10 lines:"
+          head -10 main.py
+          echo ""
+          echo "📄 src/database.py first 5 lines:"
+          head -5 src/database.py
 
       # ── Step 2: Setup Python ────────────────────
       - name: Setup Python
@@ -96,7 +110,7 @@ jobs:
           if [ -f database.json ]; then
             echo "✅ database.json found"
           else
-            echo "⚠️ database.json not found - creating..."
+            echo "⚠️ Creating database.json..."
             echo '{
               "uploaded_videos": [],
               "daily_counts": {},
