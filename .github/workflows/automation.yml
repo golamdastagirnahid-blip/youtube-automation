@@ -44,31 +44,38 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install FFmpeg
+      - name: Install FFmpeg and Tools
         run: |
           sudo apt-get update -y
           sudo apt-get install -y ffmpeg wireguard-tools
           echo "✅ FFmpeg ready"
 
-      - name: Setup Cloudflare WARP VPN
-        run: |
-          echo "🌐 Setting up WARP VPN..."
-          curl -fsSL https://raw.githubusercontent.com/P3TERX/warp.sh/main/warp.sh \
-            -o warp.sh
-          # Added sudo to fix the root error
-          sudo bash warp.sh 4
-          echo ""
-          echo "✅ VPN Connected!"
-          echo "🌍 Current IP:"
-          curl -4 ifconfig.me || true
-          echo ""
-
-      - name: Install Dependencies
+      - name: Install Python Dependencies
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
           pip install -U yt-dlp
           echo "✅ yt-dlp: $(yt-dlp --version)"
+
+      - name: Setup Cloudflare WARP VPN
+        run: |
+          echo "🌐 Setting up WARP VPN..."
+          curl -fsSL \
+            https://raw.githubusercontent.com/P3TERX/warp.sh/main/warp.sh \
+            -o warp.sh
+          sudo bash warp.sh 4
+          echo "⏳ Waiting for VPN to stabilize..."
+          sleep 10
+          echo ""
+          echo "✅ VPN Connected!"
+          echo "🌍 Current IP:"
+          curl -4 ifconfig.me || true
+          echo ""
+          echo "🌍 Location:"
+          curl -s https://ipapi.co/json/ | python3 -c \
+            "import sys,json; d=json.load(sys.stdin); \
+            print(f'Country: {d[\"country_name\"]} | IP: {d[\"ip\"]}')" \
+            || true
 
       - name: Restore Database
         uses: actions/cache@v4
