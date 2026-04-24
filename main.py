@@ -98,13 +98,13 @@ MAX_DURATION_SECONDS = 24  * 60 * 60
 
 
 # ─────────────────────────────────────────────────────────
-# Proxy Helper
+# Proxy Helpers
 # ─────────────────────────────────────────────────────────
 def load_all_proxies():
     """Load proxies from ALL countries"""
     all_proxies = []
 
-    # Main full list first
+    # Main full list
     try:
         r = requests.get(
             "https://raw.githubusercontent.com/proxifly/"
@@ -122,8 +122,11 @@ def load_all_proxies():
     except Exception as e:
         print(f"   ⚠️ Main list error: {e}")
 
-    # Priority country lists
-    for country in ["BD", "IN", "SG", "ID", "PH", "VN"]:
+    # Priority countries
+    for country in [
+        "BD", "IN", "SG", "ID",
+        "PH", "VN", "TH", "MY"
+    ]:
         try:
             url = (
                 f"https://raw.githubusercontent.com/"
@@ -135,7 +138,8 @@ def load_all_proxies():
                 lines = [
                     l.strip()
                     for l in r.text.splitlines()
-                    if l.strip() and not l.startswith('#')
+                    if l.strip() and
+                    not l.startswith('#')
                 ]
                 all_proxies.extend(lines)
         except Exception:
@@ -218,9 +222,13 @@ class YouTubeAutomation:
         print(f"   🌍 Loading proxies...")
         all_proxies = load_all_proxies()
 
-        for i, raw_proxy in enumerate(all_proxies[:20], 1):
+        if not all_proxies:
+            print(f"   ❌ No proxies available")
+            return 0
+
+        for i, raw_proxy in enumerate(all_proxies[:30], 1):
             proxy = format_proxy(raw_proxy)
-            print(f"   🔄 [{i}/20] {proxy}")
+            print(f"   🔄 [{i}/30] {proxy}")
 
             ydl_opts = {
                 'quiet'          : True,
@@ -229,7 +237,7 @@ class YouTubeAutomation:
                 'format'         : None,
                 'noplaylist'     : True,
                 'proxy'          : proxy,
-                'socket_timeout' : 15,
+                'socket_timeout' : 10,
                 'extractor_args' : {
                     'youtube': {
                         'player_client': ['android'],
@@ -275,6 +283,12 @@ class YouTubeAutomation:
                 err = str(e)
                 if 'live' in err.lower():
                     return -1
+                elif 'timeout' in err.lower():
+                    print(f"   ⏰ Timeout — next")
+                elif 'Connection' in err:
+                    print(f"   🔌 Failed — next")
+                else:
+                    print(f"   ⚠️ {err[:60]}")
                 continue
 
         print(f"⚠️ Could not get duration")
@@ -296,12 +310,10 @@ class YouTubeAutomation:
         print(f"   URL : {video_url}")
         print(f"{'='*60}")
 
-        # Already uploaded?
         if self.db.is_video_uploaded(vid_id):
             print(f"⏭️ Already uploaded: {vid_id}")
             return False
 
-        # Get video info
         print(f"\n⏱️ Checking video info...")
         duration = self.get_video_info(video_url)
 
@@ -333,7 +345,6 @@ class YouTubeAutomation:
             })
             return False
 
-        # Download audio
         print(f"\n📥 Downloading audio...")
         audio_file = self.downloader.download_audio(
             video_url, vid_id
@@ -345,19 +356,16 @@ class YouTubeAutomation:
 
         print(f"   ✅ Audio: {audio_file}")
 
-        # Modify audio
         print(f"\n🔊 Modifying audio...")
         modified_audio = self.processor.modify_audio(
             audio_file, vid_id
         )
         print(f"   ✅ Modified: {modified_audio}")
 
-        # AI metadata
         print(f"\n🤖 Generating AI metadata...")
         ai_title, ai_desc = self.ai.generate_metadata(title)
         print(f"   ✅ Title: {ai_title}")
 
-        # Calculate parts
         num_parts = max(
             1,
             -(-int(duration) // MAX_PART_SECONDS)
@@ -391,7 +399,6 @@ class YouTubeAutomation:
                 f"{self.format_duration(end_sec)}"
             )
 
-            # Thumbnail
             print(f"\n🖼️ Generating thumbnail...")
             thumb_file = self.thumb_gen.generate(
                 title    = ai_title,
@@ -403,7 +410,6 @@ class YouTubeAutomation:
             )
             print(f"   ✅ Thumbnail: {thumb_file}")
 
-            # Create video
             print(f"\n🎥 Creating video...")
             part_video = self.processor\
                 .create_image_audio_video(
@@ -420,7 +426,6 @@ class YouTubeAutomation:
 
             print(f"   ✅ Video: {part_video}")
 
-            # Build title
             if num_parts > 1:
                 part_title = (
                     f"{ai_title} "
@@ -429,7 +434,6 @@ class YouTubeAutomation:
             else:
                 part_title = ai_title
 
-            # Build description
             part_desc = (
                 f"{ai_desc}\n\n"
                 f"⏱️ Duration: "
@@ -455,7 +459,6 @@ class YouTubeAutomation:
                 f"#rainsounds #whitenoise"
             )
 
-            # Upload
             print(f"\n📤 Uploading Part {part_num}...")
 
             upload_result = self.uploader.upload_video({
@@ -480,20 +483,17 @@ class YouTubeAutomation:
             else:
                 print(f"   ❌ Part {part_num} failed")
 
-            # Cleanup part video
             if part_video and os.path.exists(part_video):
                 try:
                     os.remove(part_video)
                 except Exception:
                     pass
 
-            # Wait between parts
             if part_num < num_parts:
                 wait = random.randint(30, 60)
                 print(f"\n⏳ Waiting {wait}s...")
                 time.sleep(wait)
 
-        # Cleanup audio
         for f in [audio_file, modified_audio]:
             if f and os.path.exists(f):
                 try:
@@ -501,7 +501,6 @@ class YouTubeAutomation:
                 except Exception:
                     pass
 
-        # Save to database
         if success_count > 0:
             self.db.mark_video_uploaded(vid_id, {
                 "title"   : ai_title,
