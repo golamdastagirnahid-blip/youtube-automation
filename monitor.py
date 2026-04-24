@@ -1,7 +1,7 @@
 """
 Channel Monitor
 Checks all source channels for new videos
-Triggers upload workflow when new video found
+Triggers ONE upload at a time to prevent overload
 """
 
 import os
@@ -34,9 +34,9 @@ def trigger_upload(video_id, video_url, video_title):
     payload = {
         "event_type"    : "new_video_detected",
         "client_payload": {
-            "video_id"    : video_id,
-            "video_url"   : video_url,
-            "video_title" : video_title,
+            "video_id"     : video_id,
+            "video_url"    : video_url,
+            "video_title"  : video_title,
             "video_privacy": "public",
         }
     }
@@ -49,13 +49,54 @@ def trigger_upload(video_id, video_url, video_title):
             timeout = 15
         )
         if r.status_code == 204:
-            print(f"   ✅ Upload triggered for: {video_title}")
+            print(f"   ✅ Upload triggered: {video_title[:50]}")
             return True
         else:
-            print(f"   ❌ Trigger failed: {r.status_code} {r.text}")
+            print(f"   ❌ Trigger failed: {r.status_code}")
             return False
     except Exception as e:
         print(f"   ❌ Trigger error: {e}")
+        return False
+
+
+# ─────────────────────────────────────────────
+# Check If Upload Job Is Already Running
+# ─────────────────────────────────────────────
+def is_upload_running():
+    """Check if automation.yml is currently running"""
+    token = os.environ.get("GH_TOKEN")
+    repo  = os.environ.get("GH_REPO")
+
+    if not token or not repo:
+        return False
+
+    url     = (
+        f"https://api.github.com/repos/{repo}"
+        f"/actions/runs?status=in_progress"
+    )
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept"       : "application/vnd.github.v3+json",
+    }
+
+    try:
+        r    = requests.get(url, headers=headers, timeout=10)
+        data = r.json()
+        runs = data.get("workflow_runs", [])
+
+        for run in runs:
+            name = run.get("name", "")
+            if "Video Upload" in name or \
+               "automation" in name.lower():
+                print(
+                    f"   ⚠️ Upload already running: {name}"
+                )
+                return True
+
+        return False
+
+    except Exception as e:
+        print(f"   ⚠️ Could not check running jobs: {e}")
         return False
 
 
@@ -69,7 +110,7 @@ def load_db():
                 return json.load(f)
         except Exception:
             pass
-    return {"uploaded": {}}
+    return {"uploaded": {}, "queued": []}
 
 
 # ─────────────────────────────────────────────
@@ -84,19 +125,62 @@ def save_db(db):
 # Is Video Already Processed
 # ─────────────────────────────────────────────
 def is_processed(db, video_id):
-    return video_id in db.get("uploaded", {})
+    # Check uploaded
+    if video_id in db.get("uploaded", {}):
+        return True
+    # Check queued
+    queued = db.get("queued", [])
+    for q in queued:
+        if q.get("video_id") == video_id:
+            return True
+    return False
 
 
 # ─────────────────────────────────────────────
-# Mark Video As Queued
+# Add To Queue
 # ─────────────────────────────────────────────
-def mark_queued(db, video_id, title):
+def add_to_queue(db, video):
+    if "queued" not in db:
+        db["queued"] = []
+    db["queued"].append({
+        "video_id"  : video["video_id"],
+        "title"     : video["title"],
+        "url"       : video["url"],
+        "queued_at" : datetime.now().isoformat(),
+    })
+
+
+# ─────────────────────────────────────────────
+# Get Next From Queue
+# ─────────────────────────────────────────────
+def get_next_from_queue(db):
+    queued = db.get("queued", [])
+    if queued:
+        return queued[0]
+    return None
+
+
+# ─────────────────────────────────────────────
+# Remove From Queue
+# ─────────────────────────────────────────────
+def remove_from_queue(db, video_id):
+    queued = db.get("queued", [])
+    db["queued"] = [
+        q for q in queued
+        if q.get("video_id") != video_id
+    ]
+
+
+# ─────────────────────────────────────────────
+# Mark As Triggered
+# ─────────────────────────────────────────────
+def mark_triggered(db, video_id, title):
     if "uploaded" not in db:
         db["uploaded"] = {}
     db["uploaded"][video_id] = {
-        "title"  : title,
-        "queued" : datetime.now().isoformat(),
-        "status" : "queued"
+        "title"      : title,
+        "triggered_at": datetime.now().isoformat(),
+        "status"     : "triggered"
     }
 
 
@@ -162,73 +246,116 @@ def load_channels():
 # ─────────────────────────────────────────────
 def main():
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"🔍 Channel Monitor Started: {now}")
+    print(f"🔍 Channel Monitor: {now}")
     print("=" * 50)
 
-    # Load channels
+    # Load channels and database
     channels = load_channels()
     if not channels:
         print("❌ No channels in channels.txt!")
         return
 
-    print(f"📋 Monitoring {len(channels)} channels")
-
-    # Load database
     db = load_db()
 
-    # Check all channels
-    all_new    = []
-    triggered  = 0
+    print(f"📋 Monitoring {len(channels)} channels")
+    print(
+        f"📦 Queue size: "
+        f"{len(db.get('queued', []))} videos"
+    )
+
+    # ── Check if upload is already running ────
+    print(f"\n🔍 Checking if upload is running...")
+    if is_upload_running():
+        print(
+            f"⏳ Upload job is running — "
+            f"will check queue next time"
+        )
+        # Still scan channels to add to queue
+        # but don't trigger new upload
+        should_trigger = False
+    else:
+        print(f"✅ No upload running — ready to trigger")
+        should_trigger = True
+
+    # ── Check all channels for new videos ─────
+    print(f"\n🔍 Scanning all channels...")
+    all_new = []
 
     for i, channel_id in enumerate(channels, 1):
-        print(f"\n[{i}/{len(channels)}] Checking: {channel_id}")
-
+        print(f"   [{i}/{len(channels)}] {channel_id}")
         new_videos = check_channel(channel_id, db)
 
         if new_videos:
-            print(f"   🆕 Found {len(new_videos)} new video(s)!")
-            all_new.extend(new_videos)
+            print(
+                f"   🆕 Found {len(new_videos)} "
+                f"new video(s)"
+            )
+            for video in new_videos:
+                # Add to queue if not already there
+                if not is_processed(db, video["video_id"]):
+                    add_to_queue(db, video)
+                    all_new.append(video)
+                    print(f"   📥 Queued: {video['title'][:40]}")
         else:
             print(f"   ✅ No new videos")
 
-        # Small delay between channels
         time.sleep(1)
 
-    # Trigger uploads for new videos
-    if all_new:
-        print(f"\n{'='*50}")
-        print(f"🚀 Triggering uploads for {len(all_new)} videos...")
+    # ── Save queue to database ─────────────────
+    save_db(db)
 
-        for video in all_new:
-            print(f"\n📹 {video['title']}")
-            print(f"   ID: {video['video_id']}")
+    # ── Trigger ONE video if ready ─────────────
+    print(f"\n{'='*50}")
+    queue_size = len(db.get("queued", []))
+    print(f"📦 Total queue: {queue_size} videos")
 
-            # Trigger upload workflow
+    if should_trigger and queue_size > 0:
+        # Get next video from queue
+        next_video = get_next_from_queue(db)
+
+        if next_video:
+            print(f"\n🚀 Triggering next video:")
+            print(f"   Title: {next_video['title'][:50]}")
+            print(f"   ID   : {next_video['video_id']}")
+
             success = trigger_upload(
-                video_id    = video["video_id"],
-                video_url   = video["url"],
-                video_title = video["title"],
+                video_id    = next_video["video_id"],
+                video_url   = next_video["url"],
+                video_title = next_video["title"],
             )
 
             if success:
-                # Mark as queued in database
-                mark_queued(db, video["video_id"], video["title"])
-                triggered += 1
+                # Remove from queue
+                remove_from_queue(db, next_video["video_id"])
+                # Mark as triggered
+                mark_triggered(
+                    db,
+                    next_video["video_id"],
+                    next_video["title"]
+                )
+                # Save updated database
+                save_db(db)
+                print(f"   ✅ Triggered successfully!")
+            else:
+                print(f"   ❌ Trigger failed")
 
-            # Wait between triggers
-            time.sleep(5)
-
-        # Save updated database
-        save_db(db)
-
+    elif not should_trigger:
+        print(
+            f"\n⏳ Upload running — "
+            f"{queue_size} videos waiting in queue"
+        )
     else:
-        print(f"\n✅ No new videos found across all channels")
+        print(f"\n✅ Queue is empty — nothing to trigger")
 
+    # ── Final Summary ──────────────────────────
     print(f"\n{'='*50}")
     print(f"📊 Summary:")
-    print(f"   Channels checked : {len(channels)}")
+    print(f"   Channels scanned : {len(channels)}")
     print(f"   New videos found : {len(all_new)}")
-    print(f"   Uploads triggered: {triggered}")
+    print(
+        f"   Queue size       : "
+        f"{len(db.get('queued', []))}"
+    )
     print(f"{'='*50}")
 
 
