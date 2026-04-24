@@ -24,7 +24,7 @@ on:
 
 jobs:
   upload:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     timeout-minutes: 360
     permissions:
       contents: write
@@ -34,70 +34,36 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          token:       ${{ secrets.GH_TOKEN }}
-          clean:       true
+          token: ${{ secrets.GH_TOKEN }}
+          clean: true
           fetch-depth: 1
-          ref:         main
+          ref: main
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install FFmpeg
+      - name: Install Dependencies
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y ffmpeg
-          echo "✅ FFmpeg ready"
-
-      - name: Install Python Dependencies
-        run: |
-          pip install --upgrade pip
+          pip install -U yt-dlp
           pip install -r requirements.txt
-          pip install -U yt-dlp yt-dlp-get-oauth2
-          echo "✅ yt-dlp: $(yt-dlp --version)"
-
-      - name: Setup OAuth2 Token
-        run: |
-          echo "🔑 Setting up OAuth2 token..."
-          mkdir -p ~/.cache/yt-dlp
-          echo '${{ secrets.YT_OAUTH_TOKEN }}' \
-            > ~/.cache/yt-dlp/youtube-oauth2.token.json
-          echo "✅ OAuth2 token ready"
-
-      - name: Restore Database
-        uses: actions/cache@v4
-        with:
-          path: database.json
-          key: db-v1
-          restore-keys: db-v1
+          echo "✅ Dependencies ready"
 
       - name: Create Credentials
         run: |
-          echo '${{ secrets.CLIENT_SECRETS }}' \
-            > client_secrets.json
-          echo '${{ secrets.YOUTUBE_TOKEN }}' \
-            > token.json
+          echo '${{ secrets.CLIENT_SECRETS }}' > client_secrets.json
+          echo '${{ secrets.YOUTUBE_TOKEN }}'  > token.json
           echo "✅ Credentials created"
 
       - name: Create Database If Missing
         run: |
-          if [ ! -f database.json ]; then
-            echo '{
-              "uploaded_videos": [],
-              "daily_counts": {},
-              "statistics": {"total_uploads": 0},
-              "queued": []
-            }' > database.json
-            echo "✅ database.json created"
-          else
-            echo "✅ database.json exists"
-          fi
+          if not exist database.json (
+            echo {"uploaded_videos":[],"daily_counts":{},"statistics":{"total_uploads":0},"queued":[]} > database.json
+            echo ✅ database.json created
+          ) else (
+            echo ✅ database.json exists
+          )
 
       - name: Set Variables
+        shell: bash
         run: |
-          if [ "${{ github.event_name }}" = \
-               "workflow_dispatch" ]; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             VIDEO_ID="${{ github.event.inputs.video_id }}"
             VIDEO_URL="${{ github.event.inputs.video_url }}"
             VIDEO_TITLE="${{ github.event.inputs.video_title }}"
@@ -116,6 +82,7 @@ jobs:
           echo "VIDEO_PRIVACY=$VIDEO_PRIVACY" >> $GITHUB_ENV
 
       - name: Show Video Info
+        shell: bash
         run: |
           echo "========================================"
           echo "🎬 Video Information"
@@ -125,19 +92,19 @@ jobs:
           echo "   Privacy: ${{ env.VIDEO_PRIVACY }}"
           echo "========================================"
 
-      - name: Test YouTube Access via OAuth2
+      - name: Test YouTube Access
+        shell: bash
         run: |
-          echo "🧪 Testing YouTube access via OAuth2..."
-          yt-dlp \
-            --username oauth2 \
-            --password '' \
+          echo "🧪 Testing YouTube access..."
+          python -m yt_dlp \
             --skip-download \
             --print duration_string \
             "${{ env.VIDEO_URL }}" \
-            && echo "✅ OAuth2 SUCCESS!" \
-            || echo "⚠️ OAuth2 test failed - will retry in pipeline"
+            && echo "✅ YouTube OK!" \
+            || echo "⚠️ Test failed"
 
       - name: Run Automation
+        shell: bash
         run: python main.py run
         env:
           VIDEO_ID:           ${{ env.VIDEO_ID }}
@@ -148,6 +115,7 @@ jobs:
 
       - name: Save Database
         if: always()
+        shell: bash
         run: |
           git config user.name  "automation-bot"
           git config user.email "bot@github.com"
@@ -158,6 +126,7 @@ jobs:
 
       - name: Cleanup
         if: always()
+        shell: bash
         run: |
           rm -rf downloads/  || true
           rm -rf processed/  || true
