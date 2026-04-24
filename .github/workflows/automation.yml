@@ -50,12 +50,12 @@ jobs:
           sudo apt-get install -y ffmpeg
           echo "✅ FFmpeg ready"
 
-      - name: Install Node.js
+      - name: Install Deno
         run: |
-          curl -fsSL https://deb.nodesource.com/setup_20.x \
-            | sudo -E bash -
-          sudo apt-get install -y nodejs
-          echo "✅ Node.js: $(node --version)"
+          curl -fsSL https://deno.land/install.sh | sh
+          echo "$HOME/.deno/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.deno/bin:$PATH"
+          deno --version | head -1 && echo "✅ Deno ready"
 
       - name: Install Dependencies
         run: |
@@ -138,18 +138,23 @@ jobs:
 
       - name: Test YouTube Access
         run: |
-          echo "🧪 Testing YouTube access..."
+          export PATH="$HOME/.deno/bin:$PATH"
+          echo "🧪 Testing with Deno + PO Token + Cookies..."
+
           yt-dlp \
             --cookies cookies.txt \
             --extractor-args "youtube:player_client=web" \
             --extractor-args "youtube:po_token=web+${{ secrets.PO_TOKEN }}" \
             --extractor-args "youtube:visitor_data=${{ secrets.VISITOR_DATA }}" \
+            --js-runtimes deno \
             --skip-download \
             --print duration_string \
             "${{ env.VIDEO_URL }}" \
             && echo "✅ SUCCESS!" \
-            || echo "⚠️ Test failed - trying android..."
+            || echo "⚠️ Web failed"
 
+          echo ""
+          echo "🧪 Testing android client..."
           yt-dlp \
             --cookies cookies.txt \
             --extractor-args "youtube:player_client=android" \
@@ -157,10 +162,12 @@ jobs:
             --print duration_string \
             "${{ env.VIDEO_URL }}" \
             && echo "✅ Android SUCCESS!" \
-            || echo "⚠️ Android also failed"
+            || echo "⚠️ Android failed"
 
       - name: Run Automation
-        run: python main.py run
+        run: |
+          export PATH="$HOME/.deno/bin:$PATH"
+          python main.py run
         env:
           VIDEO_ID:           ${{ env.VIDEO_ID }}
           VIDEO_URL:          ${{ env.VIDEO_URL }}
