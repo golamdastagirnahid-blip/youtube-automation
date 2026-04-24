@@ -1,11 +1,10 @@
 """
 Video Downloader - Audio Only
-Uses OAuth2 authentication - No VPN or cookies needed
+Uses cookies + Deno + EJS remote components
 """
 
 import os
 import yt_dlp
-
 
 DOWNLOADS_DIR = os.path.join(
     os.path.dirname(
@@ -16,14 +15,12 @@ DOWNLOADS_DIR = os.path.join(
 
 os.makedirs(DOWNLOADS_DIR, exist_ok=True)
 
+COOKIES_FILE = "cookies.txt"
+
 
 class VideoDownloader:
 
     def download_audio(self, video_url, video_id):
-        """
-        Download audio using OAuth2 token
-        No VPN or cookies needed
-        """
         print(f"   🎵 Downloading: {video_id}")
 
         output_path = os.path.join(
@@ -31,38 +28,38 @@ class VideoDownloader:
             f"{video_id}.%(ext)s"
         )
 
-        # Method 1: OAuth2 (Strongest - acts like a TV app)
-        print(f"   🔄 Method 1: OAuth2...")
+        # Method 1: android client
+        print(f"   🔄 Method 1: Android...")
         result = self._try_download(
-            video_url, video_id, output_path,
-            client='oauth2'
+            video_url, video_id,
+            output_path, client='android'
         )
         if result:
             return result
 
-        # Method 2: Android client
-        print(f"   🔄 Method 2: Android client...")
+        # Method 2: ios client
+        print(f"   🔄 Method 2: iOS...")
         result = self._try_download(
-            video_url, video_id, output_path,
-            client='android'
+            video_url, video_id,
+            output_path, client='ios'
         )
         if result:
             return result
 
-        # Method 3: iOS client
-        print(f"   🔄 Method 3: iOS client...")
+        # Method 3: web client
+        print(f"   🔄 Method 3: Web...")
         result = self._try_download(
-            video_url, video_id, output_path,
-            client='ios'
+            video_url, video_id,
+            output_path, client='web'
         )
         if result:
             return result
 
-        # Method 4: Web client
-        print(f"   🔄 Method 4: Web client...")
+        # Method 4: tv client
+        print(f"   🔄 Method 4: TV...")
         result = self._try_download(
-            video_url, video_id, output_path,
-            client='web'
+            video_url, video_id,
+            output_path, client='tv'
         )
         if result:
             return result
@@ -72,45 +69,32 @@ class VideoDownloader:
 
     def _try_download(
         self, video_url, video_id,
-        output_path, client='oauth2'
+        output_path, client='android'
     ):
-        """Try downloading with specific client"""
         try:
-            if client == 'oauth2':
-                ydl_opts = {
-                    'format'         : (
-                        'bestaudio[ext=m4a]/bestaudio'
-                    ),
-                    'outtmpl'        : output_path,
-                    'quiet'          : True,
-                    'no_warnings'    : True,
-                    'username'       : 'oauth2',
-                    'password'       : '',
-                    'socket_timeout' : 30,
-                    'postprocessors' : [{
-                        'key'            : 'FFmpegExtractAudio',
-                        'preferredcodec' : 'm4a',
-                    }],
-                }
-            else:
-                ydl_opts = {
-                    'format'         : (
-                        'bestaudio[ext=m4a]/bestaudio'
-                    ),
-                    'outtmpl'        : output_path,
-                    'quiet'          : True,
-                    'no_warnings'    : True,
-                    'socket_timeout' : 30,
-                    'extractor_args' : {
-                        'youtube': {
-                            'player_client': [client],
-                        }
-                    },
-                    'postprocessors' : [{
-                        'key'            : 'FFmpegExtractAudio',
-                        'preferredcodec' : 'm4a',
-                    }],
-                }
+            ydl_opts = {
+                'format'           : (
+                    'bestaudio[ext=m4a]/bestaudio/best'
+                ),
+                'outtmpl'          : output_path,
+                'quiet'            : True,
+                'no_warnings'      : True,
+                'socket_timeout'   : 30,
+                'remote_components': 'ejs:github',
+                'extractor_args'   : {
+                    'youtube': {
+                        'player_client': [client],
+                    }
+                },
+                'postprocessors'   : [{
+                    'key'           : 'FFmpegExtractAudio',
+                    'preferredcodec': 'm4a',
+                }],
+            }
+
+            # Add cookies if file exists
+            if os.path.exists(COOKIES_FILE):
+                ydl_opts['cookiefile'] = COOKIES_FILE
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.extract_info(
@@ -118,8 +102,10 @@ class VideoDownloader:
                     download=True
                 )
 
-            # Find audio file
-            for ext in ['m4a', 'mp3', 'opus', 'webm', 'aac']:
+            # Find downloaded file
+            for ext in [
+                'm4a', 'mp3', 'opus', 'webm', 'aac'
+            ]:
                 path = os.path.join(
                     DOWNLOADS_DIR,
                     f"{video_id}.{ext}"
@@ -137,9 +123,13 @@ class VideoDownloader:
                 if video_id in f and not f.endswith(
                     ('.jpg', '.png', '.webp', '.jpeg')
                 ):
-                    return os.path.join(DOWNLOADS_DIR, f)
+                    return os.path.join(
+                        DOWNLOADS_DIR, f
+                    )
 
         except Exception as e:
-            print(f"   ⚠️ {client}: {str(e)[:80]}")
+            print(
+                f"   ⚠️ {client}: {str(e)[:80]}"
+            )
 
         return None
