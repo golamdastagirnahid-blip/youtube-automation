@@ -1,10 +1,9 @@
 """
 Video Downloader - Audio Only
-No cookies needed for worldwide public content
+Uses PO Token to bypass bot detection
 """
 
 import os
-import requests
 import yt_dlp
 
 
@@ -20,74 +19,114 @@ os.makedirs(DOWNLOADS_DIR, exist_ok=True)
 
 class VideoDownloader:
 
+    def _get_extractor_args(self, client='web'):
+        """Build extractor args with PO token"""
+        po_token     = os.environ.get("PO_TOKEN",     "")
+        visitor_data = os.environ.get("VISITOR_DATA", "")
+
+        args = {
+            'youtube': {
+                'player_client': [client],
+            }
+        }
+
+        if po_token and client == 'web':
+            args['youtube']['po_token'] = [
+                f'web+{po_token}'
+            ]
+
+        if visitor_data and client == 'web':
+            args['youtube']['visitor_data'] = [
+                visitor_data
+            ]
+
+        return args
+
     def download_audio(self, video_url, video_id):
-        print(f"   🎵 Downloading audio: {video_id}")
+        """Download audio with PO token fallback"""
+        print(f"   🎵 Downloading: {video_id}")
 
         output_path = os.path.join(
             DOWNLOADS_DIR,
             f"{video_id}.%(ext)s"
         )
 
-        # Try multiple clients
-        clients = ['android', 'ios', 'web']
+        # Method 1: Web client with PO token
+        print(f"   🔄 Method 1: Web + PO Token...")
+        ydl_opts = {
+            'format'         : 'bestaudio[ext=m4a]/bestaudio',
+            'outtmpl'        : output_path,
+            'quiet'          : True,
+            'no_warnings'    : True,
+            'extractor_args' : self._get_extractor_args('web'),
+            'postprocessors' : [{
+                'key'            : 'FFmpegExtractAudio',
+                'preferredcodec' : 'm4a',
+            }],
+        }
 
-        for client in clients:
-            print(f"   🔄 Trying client: {client}")
-            ydl_opts = {
-                'format'         : (
-                    'bestaudio[ext=m4a]/bestaudio'
-                ),
-                'outtmpl'        : output_path,
-                'quiet'          : True,
-                'no_warnings'    : True,
-                'extractor_args' : {
-                    'youtube': {
-                        'player_client': [client],
-                    }
-                },
-                'postprocessors' : [{
-                    'key'            : 'FFmpegExtractAudio',
-                    'preferredcodec' : 'm4a',
-                }],
-            }
+        result = self._try_download(
+            ydl_opts, video_url, video_id
+        )
+        if result:
+            return result
 
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.extract_info(
-                        video_url,
-                        download=True
-                    )
+        # Method 2: Android client
+        print(f"   🔄 Method 2: Android client...")
+        ydl_opts['extractor_args'] = (
+            self._get_extractor_args('android')
+        )
+        result = self._try_download(
+            ydl_opts, video_url, video_id
+        )
+        if result:
+            return result
 
-                # Find audio file
-                audio_file = None
-                for ext in ['m4a', 'mp3', 'opus', 'webm']:
-                    path = os.path.join(
-                        DOWNLOADS_DIR,
-                        f"{video_id}.{ext}"
-                    )
-                    if os.path.exists(path):
-                        audio_file = path
-                        break
+        # Method 3: iOS client
+        print(f"   🔄 Method 3: iOS client...")
+        ydl_opts['extractor_args'] = (
+            self._get_extractor_args('ios')
+        )
+        result = self._try_download(
+            ydl_opts, video_url, video_id
+        )
+        if result:
+            return result
 
-                if not audio_file:
-                    for f in os.listdir(DOWNLOADS_DIR):
-                        if video_id in f:
-                            audio_file = os.path.join(
-                                DOWNLOADS_DIR, f
-                            )
-                            break
+        print(f"   ❌ All methods failed")
+        return None
 
-                if audio_file:
-                    size = os.path.getsize(audio_file)
+    def _try_download(self, ydl_opts, video_url, video_id):
+        """Try downloading with given options"""
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.extract_info(
+                    video_url,
+                    download=True
+                )
+
+            # Find audio file
+            for ext in ['m4a', 'mp3', 'opus', 'webm', 'aac']:
+                path = os.path.join(
+                    DOWNLOADS_DIR,
+                    f"{video_id}.{ext}"
+                )
+                if os.path.exists(path):
+                    size = os.path.getsize(path)
                     print(
-                        f"   ✅ Audio downloaded: "
+                        f"   ✅ Downloaded: "
                         f"{size // 1024 // 1024} MB"
                     )
-                    return audio_file
+                    return path
 
-            except Exception as e:
-                print(f"   ❌ {client} failed: {e}")
-                continue
+            # Search by video_id
+            for f in os.listdir(DOWNLOADS_DIR):
+                if video_id in f and not f.endswith(
+                    ('.jpg', '.png', '.webp')
+                ):
+                    return os.path.join(DOWNLOADS_DIR, f)
 
-        print(f"   ❌ All clients failed")
+        except Exception as e:
+            print(f"   ⚠️ Error: {e}")
+
         return None
