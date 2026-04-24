@@ -18,7 +18,7 @@ on:
         required: false
         default: 'Relaxing Video'
       video_privacy:
-        description: 'Privacy (public/private/unlisted)'
+        description: 'Privacy'
         required: false
         default: 'public'
 
@@ -47,8 +47,20 @@ jobs:
       - name: Install FFmpeg
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg wireguard-tools
           echo "✅ FFmpeg ready"
+
+      - name: Setup Cloudflare WARP VPN
+        run: |
+          echo "🌐 Setting up WARP VPN..."
+          curl -fsSL https://raw.githubusercontent.com/P3TERX/warp.sh/main/warp.sh \
+            -o warp.sh
+          bash warp.sh 4
+          echo ""
+          echo "✅ VPN Connected!"
+          echo "🌍 Current IP:"
+          curl -4 ifconfig.me || true
+          echo ""
 
       - name: Install Dependencies
         run: |
@@ -68,7 +80,9 @@ jobs:
         run: |
           echo '${{ secrets.CLIENT_SECRETS }}' > client_secrets.json
           echo '${{ secrets.YOUTUBE_TOKEN }}'  > token.json
+          printf '%s' '${{ secrets.COOKIES_TXT }}' > cookies.txt
           echo "✅ Credentials created"
+          echo "📄 Cookies: $(wc -l < cookies.txt) lines"
 
       - name: Create Database If Missing
         run: |
@@ -114,12 +128,17 @@ jobs:
           echo "   Privacy: ${{ env.VIDEO_PRIVACY }}"
           echo "============================================"
 
-      - name: Check Resources
+      - name: Test YouTube Access
         run: |
-          echo "💾 Disk:"
-          df -h
-          echo "📦 RAM:"
-          free -h
+          echo "🧪 Testing YouTube access via WARP..."
+          yt-dlp \
+            --cookies cookies.txt \
+            --extractor-args "youtube:player_client=android" \
+            --skip-download \
+            --print duration_string \
+            "${{ env.VIDEO_URL }}" \
+            && echo "✅ SUCCESS!" \
+            || echo "⚠️ Test failed"
 
       - name: Run Automation
         run: python main.py run
@@ -146,6 +165,7 @@ jobs:
           rm -rf downloads/  || true
           rm -rf processed/  || true
           rm -rf thumbnails/ || true
+          rm -f  cookies.txt || true
           rm -f  token.json  || true
           rm -f  client_secrets.json || true
           echo "✅ Cleanup done"
