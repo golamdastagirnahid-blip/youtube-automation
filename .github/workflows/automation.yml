@@ -8,17 +8,15 @@ on:
       video_id:
         description: 'YouTube Video ID'
         required: true
-        default: ''
       video_url:
         description: 'YouTube Video URL'
         required: true
-        default: ''
       video_title:
         description: 'Video Title'
         required: false
         default: 'Relaxing Video'
       video_privacy:
-        description: 'Privacy (public/private/unlisted)'
+        description: 'Privacy'
         required: false
         default: 'public'
 
@@ -34,42 +32,28 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          token:       ${{ secrets.GH_TOKEN }}
-          clean:       true
-          fetch-depth: 1
-          ref:         main
+          token: ${{ secrets.GH_TOKEN }}
+          clean: true
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Install FFmpeg
+      - name: Install FFmpeg + Deno
         run: |
           sudo apt-get update -y
           sudo apt-get install -y ffmpeg
-          echo "✅ FFmpeg ready"
-
-      - name: Install Deno
-        run: |
           curl -fsSL https://deno.land/install.sh | sh
           echo "$HOME/.deno/bin" >> $GITHUB_PATH
-          export PATH="$HOME/.deno/bin:$PATH"
-          deno --version | head -1 && echo "✅ Deno ready"
+          echo "✅ FFmpeg ready"
+          echo "✅ Deno ready: $(deno --version | head -1)"
 
       - name: Install Dependencies
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
           pip install -U yt-dlp
-          echo "✅ yt-dlp: $(yt-dlp --version)"
-
-      - name: Restore Database
-        uses: actions/cache@v4
-        with:
-          path: database.json
-          key: db-v1
-          restore-keys: db-v1
 
       - name: Create Credentials
         run: |
@@ -77,70 +61,12 @@ jobs:
           echo '${{ secrets.YOUTUBE_TOKEN }}'  > token.json
           printf '%s' '${{ secrets.COOKIES_TXT }}' > cookies.txt
           echo "✅ Credentials created"
-          echo "📄 Cookies: $(wc -l < cookies.txt) lines"
-
-      - name: Verify Files
-        run: |
-          echo "📁 Checking files..."
-          [ -f cookies.txt ] && \
-            echo "✅ cookies.txt ($(wc -c < cookies.txt) bytes)" || \
-            echo "❌ cookies.txt missing"
-          [ -f client_secrets.json ] && \
-            echo "✅ client_secrets.json" || \
-            echo "❌ client_secrets.json missing"
-          [ -f token.json ] && \
-            echo "✅ token.json" || \
-            echo "❌ token.json missing"
-          if [ ! -f database.json ]; then
-            echo '{"uploaded_videos":[],"daily_counts":{},"statistics":{"total_uploads":0},"queued":[]}' \
-              > database.json
-            echo "✅ database.json created"
-          else
-            echo "✅ database.json found"
-          fi
-
-      - name: Set Variables
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VIDEO_ID="${{ github.event.inputs.video_id }}"
-            VIDEO_URL="${{ github.event.inputs.video_url }}"
-            VIDEO_TITLE="${{ github.event.inputs.video_title }}"
-            VIDEO_PRIVACY="${{ github.event.inputs.video_privacy }}"
-          else
-            VIDEO_ID="${{ github.event.client_payload.video_id }}"
-            VIDEO_URL="${{ github.event.client_payload.video_url }}"
-            VIDEO_TITLE="${{ github.event.client_payload.video_title }}"
-            VIDEO_PRIVACY="${{ github.event.client_payload.video_privacy }}"
-          fi
-          [ -z "$VIDEO_PRIVACY" ] && VIDEO_PRIVACY="public"
-          [ -z "$VIDEO_TITLE"   ] && VIDEO_TITLE="Relaxing Video"
-          echo "VIDEO_ID=$VIDEO_ID"           >> $GITHUB_ENV
-          echo "VIDEO_URL=$VIDEO_URL"         >> $GITHUB_ENV
-          echo "VIDEO_TITLE=$VIDEO_TITLE"     >> $GITHUB_ENV
-          echo "VIDEO_PRIVACY=$VIDEO_PRIVACY" >> $GITHUB_ENV
-
-      - name: Show Video Info
-        run: |
-          echo "============================================"
-          echo "🎬 Video Information"
-          echo "   ID     : ${{ env.VIDEO_ID }}"
-          echo "   URL    : ${{ env.VIDEO_URL }}"
-          echo "   Title  : ${{ env.VIDEO_TITLE }}"
-          echo "   Privacy: ${{ env.VIDEO_PRIVACY }}"
-          echo "============================================"
-
-      - name: Check Disk Space
-        run: |
-          echo "💾 Disk:"
-          df -h
-          echo "📦 RAM:"
-          free -h
+          echo "📄 cookies.txt size: $(wc -c < cookies.txt) bytes"
 
       - name: Test YouTube Access
         run: |
           export PATH="$HOME/.deno/bin:$PATH"
-          echo "🧪 Testing with Deno + PO Token + Cookies..."
-
+          echo "🧪 Testing with cookies + PO Token + Deno..."
           yt-dlp \
             --cookies cookies.txt \
             --extractor-args "youtube:player_client=web" \
@@ -150,18 +76,18 @@ jobs:
             --skip-download \
             --print duration_string \
             "${{ env.VIDEO_URL }}" \
-            && echo "✅ SUCCESS!" \
-            || echo "⚠️ Web failed"
+            && echo "✅ SUCCESS with PO Token" \
+            || echo "⚠️ PO Token failed"
 
           echo ""
-          echo "🧪 Testing android client..."
+          echo "🧪 Testing Android client..."
           yt-dlp \
             --cookies cookies.txt \
             --extractor-args "youtube:player_client=android" \
             --skip-download \
             --print duration_string \
             "${{ env.VIDEO_URL }}" \
-            && echo "✅ Android SUCCESS!" \
+            && echo "✅ Android SUCCESS" \
             || echo "⚠️ Android failed"
 
       - name: Run Automation
@@ -183,17 +109,12 @@ jobs:
           git config user.name  "automation-bot"
           git config user.email "bot@github.com"
           git add database.json || true
-          git diff --staged --quiet || \
-            git commit -m "Update DB [skip ci]"
+          git diff --staged --quiet || git commit -m "Update DB [skip ci]"
           git push || true
 
       - name: Cleanup
         if: always()
         run: |
-          rm -rf downloads/  || true
-          rm -rf processed/  || true
-          rm -rf thumbnails/ || true
-          rm -f  cookies.txt || true
-          rm -f  token.json  || true
-          rm -f  client_secrets.json || true
+          rm -rf downloads/ processed/ thumbnails/ || true
+          rm -f cookies.txt token.json client_secrets.json || true
           echo "✅ Cleanup done"
