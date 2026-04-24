@@ -44,38 +44,26 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install FFmpeg and Tools
+      - name: Install FFmpeg
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y ffmpeg wireguard-tools
+          sudo apt-get install -y ffmpeg
           echo "✅ FFmpeg ready"
 
       - name: Install Python Dependencies
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
-          pip install -U yt-dlp
+          pip install -U yt-dlp yt-dlp-get-oauth2
           echo "✅ yt-dlp: $(yt-dlp --version)"
 
-      - name: Setup Cloudflare WARP VPN
+      - name: Setup OAuth2 Token
         run: |
-          echo "🌐 Setting up WARP VPN..."
-          curl -fsSL \
-            https://raw.githubusercontent.com/P3TERX/warp.sh/main/warp.sh \
-            -o warp.sh
-          sudo bash warp.sh 4
-          echo "⏳ Waiting for VPN to stabilize..."
-          sleep 10
-          echo ""
-          echo "✅ VPN Connected!"
-          echo "🌍 Current IP:"
-          curl -4 ifconfig.me || true
-          echo ""
-          echo "🌍 Location:"
-          curl -s https://ipapi.co/json/ | python3 -c \
-            "import sys,json; d=json.load(sys.stdin); \
-            print(f'Country: {d[\"country_name\"]} | IP: {d[\"ip\"]}')" \
-            || true
+          echo "🔑 Setting up OAuth2 token..."
+          mkdir -p ~/.cache/yt-dlp
+          echo '${{ secrets.YT_OAUTH_TOKEN }}' \
+            > ~/.cache/yt-dlp/youtube-oauth2.token.json
+          echo "✅ OAuth2 token ready"
 
       - name: Restore Database
         uses: actions/cache@v4
@@ -86,11 +74,11 @@ jobs:
 
       - name: Create Credentials
         run: |
-          echo '${{ secrets.CLIENT_SECRETS }}' > client_secrets.json
-          echo '${{ secrets.YOUTUBE_TOKEN }}'  > token.json
-          printf '%s' '${{ secrets.COOKIES_TXT }}' > cookies.txt
+          echo '${{ secrets.CLIENT_SECRETS }}' \
+            > client_secrets.json
+          echo '${{ secrets.YOUTUBE_TOKEN }}' \
+            > token.json
           echo "✅ Credentials created"
-          echo "📄 Cookies: $(wc -l < cookies.txt) lines"
 
       - name: Create Database If Missing
         run: |
@@ -108,7 +96,8 @@ jobs:
 
       - name: Set Variables
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ "${{ github.event_name }}" = \
+               "workflow_dispatch" ]; then
             VIDEO_ID="${{ github.event.inputs.video_id }}"
             VIDEO_URL="${{ github.event.inputs.video_url }}"
             VIDEO_TITLE="${{ github.event.inputs.video_title }}"
@@ -120,7 +109,7 @@ jobs:
             VIDEO_PRIVACY="${{ github.event.client_payload.video_privacy }}"
           fi
           [ -z "$VIDEO_PRIVACY" ] && VIDEO_PRIVACY="public"
-          [ -z "$VIDEO_TITLE"   ] && VIDEO_TITLE="Relaxing Video"
+          [ -z "$VIDEO_TITLE" ]   && VIDEO_TITLE="Relaxing Video"
           echo "VIDEO_ID=$VIDEO_ID"           >> $GITHUB_ENV
           echo "VIDEO_URL=$VIDEO_URL"         >> $GITHUB_ENV
           echo "VIDEO_TITLE=$VIDEO_TITLE"     >> $GITHUB_ENV
@@ -128,25 +117,25 @@ jobs:
 
       - name: Show Video Info
         run: |
-          echo "============================================"
+          echo "========================================"
           echo "🎬 Video Information"
           echo "   ID     : ${{ env.VIDEO_ID }}"
           echo "   URL    : ${{ env.VIDEO_URL }}"
           echo "   Title  : ${{ env.VIDEO_TITLE }}"
           echo "   Privacy: ${{ env.VIDEO_PRIVACY }}"
-          echo "============================================"
+          echo "========================================"
 
-      - name: Test YouTube Access
+      - name: Test YouTube Access via OAuth2
         run: |
-          echo "🧪 Testing YouTube access via WARP..."
+          echo "🧪 Testing YouTube access via OAuth2..."
           yt-dlp \
-            --cookies cookies.txt \
-            --extractor-args "youtube:player_client=android" \
+            --username oauth2 \
+            --password '' \
             --skip-download \
             --print duration_string \
             "${{ env.VIDEO_URL }}" \
-            && echo "✅ SUCCESS!" \
-            || echo "⚠️ Test failed"
+            && echo "✅ OAuth2 SUCCESS!" \
+            || echo "⚠️ OAuth2 test failed - will retry in pipeline"
 
       - name: Run Automation
         run: python main.py run
@@ -173,7 +162,6 @@ jobs:
           rm -rf downloads/  || true
           rm -rf processed/  || true
           rm -rf thumbnails/ || true
-          rm -f  cookies.txt || true
           rm -f  token.json  || true
           rm -f  client_secrets.json || true
           echo "✅ Cleanup done"
