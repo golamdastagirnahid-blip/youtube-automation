@@ -1,6 +1,6 @@
 """
 Video Downloader - Audio Only
-Uses proxies from ALL countries via proxifly
+Uses worldwide proxies from proxifly
 """
 
 import os
@@ -18,18 +18,6 @@ DOWNLOADS_DIR = os.path.join(
 
 os.makedirs(DOWNLOADS_DIR, exist_ok=True)
 
-# All available country codes from proxifly
-PROXY_COUNTRIES = [
-    "BD", "IN", "SG", "US", "GB", "DE", "FR",
-    "NL", "CA", "AU", "JP", "KR", "BR", "AR",
-    "MX", "TR", "ID", "PH", "VN", "TH", "PK",
-    "NG", "KE", "ZA", "EG", "RU", "UA", "PL",
-    "CZ", "HU", "RO", "BG", "HR", "RS", "SK",
-    "AT", "CH", "SE", "NO", "DK", "FI", "PT",
-    "ES", "IT", "GR", "IL", "AE", "SA", "IR",
-    "HK", "TW", "MY", "MM", "KH", "LK", "NP",
-]
-
 
 class VideoDownloader:
 
@@ -37,13 +25,10 @@ class VideoDownloader:
         self.proxies = []
 
     def _load_proxies(self):
-        """Load proxies from ALL countries"""
-        print(f"   🌍 Loading proxies from all countries...")
-
-        # First try the main proxy list
+        """Load proxies from all countries"""
         all_proxies = []
 
-        # Try main proxifly list
+        # Main full list
         try:
             r = requests.get(
                 "https://raw.githubusercontent.com/proxifly/"
@@ -59,18 +44,16 @@ class VideoDownloader:
                 ]
                 all_proxies.extend(lines)
                 print(
-                    f"   ✅ Main list: "
-                    f"{len(lines)} proxies"
+                    f"   ✅ Main: {len(lines)} proxies"
                 )
         except Exception as e:
-            print(f"   ⚠️ Main list failed: {e}")
+            print(f"   ⚠️ {e}")
 
-        # Also load from specific countries
-        priority_countries = [
+        # Priority countries
+        for country in [
             "BD", "IN", "SG", "ID",
             "PH", "VN", "TH", "MY"
-        ]
-        for country in priority_countries:
+        ]:
             try:
                 url = (
                     f"https://raw.githubusercontent.com/"
@@ -91,14 +74,10 @@ class VideoDownloader:
 
         random.shuffle(all_proxies)
         self.proxies = all_proxies
-        print(
-            f"   📦 Total proxies loaded: "
-            f"{len(all_proxies)}"
-        )
+        print(f"   📦 Total: {len(all_proxies)} proxies")
         return all_proxies
 
     def _format_proxy(self, proxy):
-        """Format proxy URL"""
         if not proxy:
             return None
         if proxy.startswith('http') or \
@@ -107,7 +86,6 @@ class VideoDownloader:
         return f"http://{proxy}"
 
     def download_audio(self, video_url, video_id):
-        """Download audio using rotating proxies"""
         print(f"   🎵 Downloading: {video_id}")
 
         if not self.proxies:
@@ -118,8 +96,7 @@ class VideoDownloader:
             f"{video_id}.%(ext)s"
         )
 
-        # Try up to 20 different proxies
-        proxies_to_try = self.proxies[:20]
+        proxies_to_try = self.proxies[:30]
 
         for i, raw_proxy in enumerate(proxies_to_try, 1):
             proxy = self._format_proxy(raw_proxy)
@@ -137,7 +114,7 @@ class VideoDownloader:
                     'quiet'          : True,
                     'no_warnings'    : True,
                     'proxy'          : proxy,
-                    'socket_timeout' : 30,
+                    'socket_timeout' : 10,
                     'extractor_args' : {
                         'youtube': {
                             'player_client': [client],
@@ -187,11 +164,13 @@ class VideoDownloader:
 
         except Exception as e:
             err = str(e)
-            if 'Sign in' in err or 'bot' in err.lower():
-                print(f"   ⚠️ Bot detected")
-            elif 'timeout' in err.lower():
-                print(f"   ⚠️ Timeout")
+            if 'timeout' in err.lower():
+                print(f"   ⏰ Timeout")
+            elif 'Sign in' in err or 'bot' in err.lower():
+                print(f"   🤖 Bot detected")
+            elif 'Connection' in err:
+                print(f"   🔌 Connection failed")
             else:
-                print(f"   ⚠️ {err[:80]}")
+                print(f"   ⚠️ {err[:60]}")
 
         return None
