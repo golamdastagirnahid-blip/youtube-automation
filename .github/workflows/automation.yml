@@ -16,7 +16,7 @@ on:
       video_title:
         description: 'Video Title'
         required: false
-        default: 'Test Video'
+        default: 'Relaxing Video'
       video_privacy:
         description: 'Video Privacy (public/private/unlisted)'
         required: false
@@ -25,7 +25,7 @@ on:
 jobs:
   upload:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 360
 
     steps:
 
@@ -44,6 +44,7 @@ jobs:
         run: |
           sudo apt-get update -y
           sudo apt-get install -y ffmpeg
+          echo "✅ FFmpeg version: $(ffmpeg -version | head -1)"
 
       # ── Step 4: Install Dependencies ──────────────────
       - name: Install Dependencies
@@ -51,6 +52,7 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
           pip install -U yt-dlp
+          echo "✅ yt-dlp version: $(yt-dlp --version)"
 
       # ── Step 5: Restore Database ───────────────────────
       - name: Restore Database
@@ -66,126 +68,123 @@ jobs:
           echo '${{ secrets.CLIENT_SECRETS }}' > client_secrets.json
           echo '${{ secrets.YOUTUBE_TOKEN }}'  > token.json
           printf '%s' '${{ secrets.COOKIES_TXT }}' > cookies.txt
+          echo "✅ Credentials created"
 
       # ── Step 7: Verify Files ───────────────────────────
       - name: Verify Files
         run: |
           echo "📁 Checking credential files..."
+
           if [ -f "cookies.txt" ]; then
             SIZE=$(wc -c < cookies.txt)
             echo "✅ cookies.txt found ($SIZE bytes)"
           else
             echo "❌ cookies.txt NOT found!"
           fi
+
           if [ -f "client_secrets.json" ]; then
             echo "✅ client_secrets.json found"
           else
             echo "❌ client_secrets.json NOT found!"
           fi
+
           if [ -f "token.json" ]; then
             echo "✅ token.json found"
           else
             echo "❌ token.json NOT found!"
           fi
 
-      # ── Step 8: Test BD/IN Proxies ────────────────────
-      - name: Test BD/IN Proxies
-        run: |
-          echo "🔄 Testing BD/IN proxies from proxifly..."
-          python3 - <<'EOF'
-          import requests
-          import random
+          if [ -f "channels.txt" ]; then
+            COUNT=$(wc -l < channels.txt)
+            echo "✅ channels.txt found ($COUNT channels)"
+            echo "📋 Channels:"
+            cat channels.txt
+          else
+            echo "❌ channels.txt NOT found!"
+          fi
 
-          sources = {
-              "BD": "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/countries/BD/data.txt",
-              "IN": "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/countries/IN/data.txt",
-          }
-
-          all_proxies = []
-          for country, url in sources.items():
-              try:
-                  r = requests.get(url, timeout=15)
-                  if r.status_code == 200:
-                      lines = [l.strip() for l in r.text.splitlines()
-                               if l.strip() and not l.startswith('#')]
-                      print(f"   ✅ {country}: {len(lines)} proxies loaded")
-                      all_proxies.extend(lines)
-                  else:
-                      print(f"   ❌ {country}: HTTP {r.status_code}")
-              except Exception as e:
-                  print(f"   ❌ {country}: {e}")
-
-          print(f"\n   📦 Total proxies: {len(all_proxies)}")
-
-          # Test first 5 proxies
-          print("\n   🔍 Testing sample proxies...")
-          random.shuffle(all_proxies)
-          working = 0
-
-          for proxy in all_proxies[:10]:
-              if not proxy.startswith('http'):
-                  proxy = f"http://{proxy}"
-              try:
-                  r = requests.get(
-                      "https://www.youtube.com",
-                      proxies={"http": proxy, "https": proxy},
-                      timeout=8,
-                      headers={"User-Agent": "Mozilla/5.0"}
-                  )
-                  if r.status_code in (200, 403):
-                      print(f"   ✅ Working: {proxy}")
-                      working += 1
-                      if working >= 3:
-                          break
-              except:
-                  pass
-
-          print(f"\n   🎯 Found {working} working proxies in test")
-          EOF
-
-      # ── Step 9: Set Video Variables ───────────────────
+      # ── Step 8: Set Video Variables ───────────────────
       - name: Set Video Variables
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "VIDEO_ID=${{ github.event.inputs.video_id }}"           >> $GITHUB_ENV
-            echo "VIDEO_URL=${{ github.event.inputs.video_url }}"         >> $GITHUB_ENV
-            echo "VIDEO_TITLE=${{ github.event.inputs.video_title }}"     >> $GITHUB_ENV
-            echo "VIDEO_PRIVACY=${{ github.event.inputs.video_privacy }}" >> $GITHUB_ENV
+
+            VIDEO_ID="${{ github.event.inputs.video_id }}"
+            VIDEO_URL="${{ github.event.inputs.video_url }}"
+            VIDEO_TITLE="${{ github.event.inputs.video_title }}"
+            VIDEO_PRIVACY="${{ github.event.inputs.video_privacy }}"
+
           else
-            echo "VIDEO_ID=${{ github.event.client_payload.video_id }}"           >> $GITHUB_ENV
-            echo "VIDEO_URL=${{ github.event.client_payload.video_url }}"         >> $GITHUB_ENV
-            echo "VIDEO_TITLE=${{ github.event.client_payload.video_title }}"     >> $GITHUB_ENV
-            echo "VIDEO_PRIVACY=${{ github.event.client_payload.video_privacy }}" >> $GITHUB_ENV
+
+            VIDEO_ID="${{ github.event.client_payload.video_id }}"
+            VIDEO_URL="${{ github.event.client_payload.video_url }}"
+            VIDEO_TITLE="${{ github.event.client_payload.video_title }}"
+            VIDEO_PRIVACY="${{ github.event.client_payload.video_privacy }}"
+
           fi
 
-      # ── Step 10: Show Video Info ───────────────────────
+          # Set defaults if empty
+          if [ -z "$VIDEO_PRIVACY" ]; then
+            VIDEO_PRIVACY="public"
+          fi
+
+          if [ -z "$VIDEO_TITLE" ]; then
+            VIDEO_TITLE="Relaxing Video"
+          fi
+
+          echo "VIDEO_ID=$VIDEO_ID"       >> $GITHUB_ENV
+          echo "VIDEO_URL=$VIDEO_URL"     >> $GITHUB_ENV
+          echo "VIDEO_TITLE=$VIDEO_TITLE" >> $GITHUB_ENV
+          echo "VIDEO_PRIVACY=$VIDEO_PRIVACY" >> $GITHUB_ENV
+
+      # ── Step 9: Show Video Info ────────────────────────
       - name: Show Video Info
         run: |
           echo "============================================"
           echo "🎬 Video Information"
-          echo "   ID     : ${{ env.VIDEO_ID }}"
-          echo "   URL    : ${{ env.VIDEO_URL }}"
-          echo "   Title  : ${{ env.VIDEO_TITLE }}"
-          echo "   Privacy: ${{ env.VIDEO_PRIVACY }}"
+          echo "   ID      : ${{ env.VIDEO_ID }}"
+          echo "   URL     : ${{ env.VIDEO_URL }}"
+          echo "   Title   : ${{ env.VIDEO_TITLE }}"
+          echo "   Privacy : ${{ env.VIDEO_PRIVACY }}"
           echo "============================================"
 
-      # ── Step 11: Check yt-dlp Version ─────────────────
-      - name: Check yt-dlp Version
+      # ── Step 10: Check Disk Space ─────────────────────
+      - name: Check Disk Space
         run: |
-          echo "📦 yt-dlp version: $(yt-dlp --version)"
+          echo "💾 Available disk space:"
+          df -h
+          echo ""
+          echo "📦 Available RAM:"
+          free -h
 
-      # ── Step 12: Run Automation ────────────────────────
+      # ── Step 11: Run Automation ────────────────────────
       - name: Run Automation
         run: python main.py run
         env:
-          VIDEO_PRIVACY: ${{ env.VIDEO_PRIVACY }}
+          VIDEO_ID:            ${{ env.VIDEO_ID }}
+          VIDEO_URL:           ${{ env.VIDEO_URL }}
+          VIDEO_TITLE:         ${{ env.VIDEO_TITLE }}
+          VIDEO_PRIVACY:       ${{ env.VIDEO_PRIVACY }}
+          OPENROUTER_API_KEY:  ${{ secrets.OPENROUTER_API_KEY }}
 
-      # ── Step 13: Save Database ─────────────────────────
+      # ── Step 12: Save Database ─────────────────────────
       - name: Save Database
         if: always()
         run: |
           git config user.name  "automation-bot"
           git config user.email "bot@github.com"
           git add database.json || true
-          git diff --staged --quiet || git commit -m "Update DB [skip ci]"
+          git diff --staged --quiet || \
+            git commit -m "Update DB [skip ci]"
           git push || true
+
+      # ── Step 13: Cleanup Large Files ──────────────────
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "🧹 Cleaning up large files..."
+          rm -rf downloads/ || true
+          rm -rf processed/ || true
+          rm -f cookies.txt || true
+          rm -f token.json  || true
+          rm -f client_secrets.json || true
+          echo "✅ Cleanup complete"
