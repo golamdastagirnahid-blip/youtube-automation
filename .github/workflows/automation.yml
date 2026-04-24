@@ -1,4 +1,4 @@
-name: YouTube Automation
+name: Video Upload
 
 on:
   repository_dispatch:
@@ -7,18 +7,18 @@ on:
     inputs:
       video_id:
         description: 'YouTube Video ID'
-        required: false
+        required: true
         default: ''
       video_url:
         description: 'YouTube Video URL'
-        required: false
+        required: true
         default: ''
       video_title:
         description: 'Video Title'
         required: false
         default: 'Relaxing Video'
       video_privacy:
-        description: 'Video Privacy (public/private/unlisted)'
+        description: 'Privacy (public/private/unlisted)'
         required: false
         default: 'public'
 
@@ -29,32 +29,32 @@ jobs:
 
     steps:
 
-      # ── Step 1: Checkout Code ──────────────────────────
+      # ── Step 1: Checkout ────────────────────────
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # ── Step 2: Setup Python ───────────────────────────
+      # ── Step 2: Setup Python ────────────────────
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      # ── Step 3: Install FFmpeg ─────────────────────────
+      # ── Step 3: Install FFmpeg ───────────────────
       - name: Install FFmpeg
         run: |
           sudo apt-get update -y
           sudo apt-get install -y ffmpeg
-          echo "✅ FFmpeg version: $(ffmpeg -version | head -1)"
+          echo "✅ FFmpeg: $(ffmpeg -version | head -1)"
 
-      # ── Step 4: Install Dependencies ──────────────────
+      # ── Step 4: Install Dependencies ────────────
       - name: Install Dependencies
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
           pip install -U yt-dlp
-          echo "✅ yt-dlp version: $(yt-dlp --version)"
+          echo "✅ yt-dlp: $(yt-dlp --version)"
 
-      # ── Step 5: Restore Database ───────────────────────
+      # ── Step 5: Restore Database ─────────────────
       - name: Restore Database
         uses: actions/cache@v4
         with:
@@ -62,7 +62,7 @@ jobs:
           key: db-v1
           restore-keys: db-v1
 
-      # ── Step 6: Create Credentials ────────────────────
+      # ── Step 6: Create Credentials ───────────────
       - name: Create Credentials
         run: |
           echo '${{ secrets.CLIENT_SECRETS }}' > client_secrets.json
@@ -70,73 +70,44 @@ jobs:
           printf '%s' '${{ secrets.COOKIES_TXT }}' > cookies.txt
           echo "✅ Credentials created"
 
-      # ── Step 7: Verify Files ───────────────────────────
+      # ── Step 7: Verify Files ─────────────────────
       - name: Verify Files
         run: |
-          echo "📁 Checking credential files..."
+          echo "📁 Checking files..."
+          [ -f cookies.txt ] && \
+            echo "✅ cookies.txt ($(wc -c < cookies.txt) bytes)" || \
+            echo "❌ cookies.txt missing"
+          [ -f client_secrets.json ] && \
+            echo "✅ client_secrets.json" || \
+            echo "❌ client_secrets.json missing"
+          [ -f token.json ] && \
+            echo "✅ token.json" || \
+            echo "❌ token.json missing"
 
-          if [ -f "cookies.txt" ]; then
-            SIZE=$(wc -c < cookies.txt)
-            echo "✅ cookies.txt found ($SIZE bytes)"
-          else
-            echo "❌ cookies.txt NOT found!"
-          fi
-
-          if [ -f "client_secrets.json" ]; then
-            echo "✅ client_secrets.json found"
-          else
-            echo "❌ client_secrets.json NOT found!"
-          fi
-
-          if [ -f "token.json" ]; then
-            echo "✅ token.json found"
-          else
-            echo "❌ token.json NOT found!"
-          fi
-
-          if [ -f "channels.txt" ]; then
-            COUNT=$(wc -l < channels.txt)
-            echo "✅ channels.txt found ($COUNT channels)"
-            echo "📋 Channels:"
-            cat channels.txt
-          else
-            echo "❌ channels.txt NOT found!"
-          fi
-
-      # ── Step 8: Set Video Variables ───────────────────
-      - name: Set Video Variables
+      # ── Step 8: Set Variables ────────────────────
+      - name: Set Variables
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-
             VIDEO_ID="${{ github.event.inputs.video_id }}"
             VIDEO_URL="${{ github.event.inputs.video_url }}"
             VIDEO_TITLE="${{ github.event.inputs.video_title }}"
             VIDEO_PRIVACY="${{ github.event.inputs.video_privacy }}"
-
           else
-
             VIDEO_ID="${{ github.event.client_payload.video_id }}"
             VIDEO_URL="${{ github.event.client_payload.video_url }}"
             VIDEO_TITLE="${{ github.event.client_payload.video_title }}"
             VIDEO_PRIVACY="${{ github.event.client_payload.video_privacy }}"
-
           fi
 
-          # Set defaults if empty
-          if [ -z "$VIDEO_PRIVACY" ]; then
-            VIDEO_PRIVACY="public"
-          fi
+          [ -z "$VIDEO_PRIVACY" ] && VIDEO_PRIVACY="public"
+          [ -z "$VIDEO_TITLE"   ] && VIDEO_TITLE="Relaxing Video"
 
-          if [ -z "$VIDEO_TITLE" ]; then
-            VIDEO_TITLE="Relaxing Video"
-          fi
-
-          echo "VIDEO_ID=$VIDEO_ID"       >> $GITHUB_ENV
-          echo "VIDEO_URL=$VIDEO_URL"     >> $GITHUB_ENV
-          echo "VIDEO_TITLE=$VIDEO_TITLE" >> $GITHUB_ENV
+          echo "VIDEO_ID=$VIDEO_ID"           >> $GITHUB_ENV
+          echo "VIDEO_URL=$VIDEO_URL"         >> $GITHUB_ENV
+          echo "VIDEO_TITLE=$VIDEO_TITLE"     >> $GITHUB_ENV
           echo "VIDEO_PRIVACY=$VIDEO_PRIVACY" >> $GITHUB_ENV
 
-      # ── Step 9: Show Video Info ────────────────────────
+      # ── Step 9: Show Video Info ──────────────────
       - name: Show Video Info
         run: |
           echo "============================================"
@@ -147,26 +118,25 @@ jobs:
           echo "   Privacy : ${{ env.VIDEO_PRIVACY }}"
           echo "============================================"
 
-      # ── Step 10: Check Disk Space ─────────────────────
+      # ── Step 10: Check Disk Space ────────────────
       - name: Check Disk Space
         run: |
-          echo "💾 Available disk space:"
+          echo "💾 Disk space:"
           df -h
-          echo ""
-          echo "📦 Available RAM:"
+          echo "📦 RAM:"
           free -h
 
-      # ── Step 11: Run Automation ────────────────────────
+      # ── Step 11: Run Automation ──────────────────
       - name: Run Automation
         run: python main.py run
         env:
-          VIDEO_ID:            ${{ env.VIDEO_ID }}
-          VIDEO_URL:           ${{ env.VIDEO_URL }}
-          VIDEO_TITLE:         ${{ env.VIDEO_TITLE }}
-          VIDEO_PRIVACY:       ${{ env.VIDEO_PRIVACY }}
-          OPENROUTER_API_KEY:  ${{ secrets.OPENROUTER_API_KEY }}
+          VIDEO_ID:           ${{ env.VIDEO_ID }}
+          VIDEO_URL:          ${{ env.VIDEO_URL }}
+          VIDEO_TITLE:        ${{ env.VIDEO_TITLE }}
+          VIDEO_PRIVACY:      ${{ env.VIDEO_PRIVACY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
 
-      # ── Step 12: Save Database ─────────────────────────
+      # ── Step 12: Save Database ───────────────────
       - name: Save Database
         if: always()
         run: |
@@ -177,14 +147,15 @@ jobs:
             git commit -m "Update DB [skip ci]"
           git push || true
 
-      # ── Step 13: Cleanup Large Files ──────────────────
+      # ── Step 13: Cleanup ─────────────────────────
       - name: Cleanup
         if: always()
         run: |
-          echo "🧹 Cleaning up large files..."
-          rm -rf downloads/ || true
-          rm -rf processed/ || true
-          rm -f cookies.txt || true
-          rm -f token.json  || true
-          rm -f client_secrets.json || true
-          echo "✅ Cleanup complete"
+          echo "🧹 Cleaning up..."
+          rm -rf downloads/  || true
+          rm -rf processed/  || true
+          rm -rf thumbnails/ || true
+          rm -f  cookies.txt || true
+          rm -f  token.json  || true
+          rm -f  client_secrets.json || true
+          echo "✅ Cleanup done"
