@@ -55,7 +55,8 @@ jobs:
           echo "🌐 Setting up WARP VPN..."
           curl -fsSL https://raw.githubusercontent.com/P3TERX/warp.sh/main/warp.sh \
             -o warp.sh
-          bash warp.sh 4
+          # Added sudo to fix the root error
+          sudo bash warp.sh 4
           echo ""
           echo "✅ VPN Connected!"
           echo "🌍 Current IP:"
