@@ -1,11 +1,10 @@
 """
 Video Downloader - Audio Only
-Uses worldwide proxies from proxifly
+Uses Cloudflare WARP VPN (set in workflow)
+No proxy needed - VPN handles IP routing
 """
 
 import os
-import random
-import requests
 import yt_dlp
 
 
@@ -21,128 +20,81 @@ os.makedirs(DOWNLOADS_DIR, exist_ok=True)
 
 class VideoDownloader:
 
-    def __init__(self):
-        self.proxies = []
-
-    def _load_proxies(self):
-        """Load proxies from all countries"""
-        all_proxies = []
-
-        # Main full list
-        try:
-            r = requests.get(
-                "https://raw.githubusercontent.com/proxifly/"
-                "free-proxy-list/main/proxies/all/data.txt",
-                timeout=15
-            )
-            if r.status_code == 200:
-                lines = [
-                    l.strip()
-                    for l in r.text.splitlines()
-                    if l.strip() and
-                    not l.startswith('#')
-                ]
-                all_proxies.extend(lines)
-                print(
-                    f"   ✅ Main: {len(lines)} proxies"
-                )
-        except Exception as e:
-            print(f"   ⚠️ {e}")
-
-        # Priority countries
-        for country in [
-            "BD", "IN", "SG", "ID",
-            "PH", "VN", "TH", "MY"
-        ]:
-            try:
-                url = (
-                    f"https://raw.githubusercontent.com/"
-                    f"proxifly/free-proxy-list/main/"
-                    f"proxies/countries/{country}/data.txt"
-                )
-                r = requests.get(url, timeout=10)
-                if r.status_code == 200:
-                    lines = [
-                        l.strip()
-                        for l in r.text.splitlines()
-                        if l.strip() and
-                        not l.startswith('#')
-                    ]
-                    all_proxies.extend(lines)
-            except Exception:
-                continue
-
-        random.shuffle(all_proxies)
-        self.proxies = all_proxies
-        print(f"   📦 Total: {len(all_proxies)} proxies")
-        return all_proxies
-
-    def _format_proxy(self, proxy):
-        if not proxy:
-            return None
-        if proxy.startswith('http') or \
-           proxy.startswith('socks'):
-            return proxy
-        return f"http://{proxy}"
-
     def download_audio(self, video_url, video_id):
+        """
+        Download audio using WARP VPN IP
+        No proxy needed - VPN is active at system level
+        """
         print(f"   🎵 Downloading: {video_id}")
-
-        if not self.proxies:
-            self._load_proxies()
 
         output_path = os.path.join(
             DOWNLOADS_DIR,
             f"{video_id}.%(ext)s"
         )
 
-        proxies_to_try = self.proxies[:30]
+        # Method 1: Android client
+        print(f"   🔄 Method 1: Android client...")
+        result = self._try_download(
+            video_url, video_id, output_path,
+            client='android'
+        )
+        if result:
+            return result
 
-        for i, raw_proxy in enumerate(proxies_to_try, 1):
-            proxy = self._format_proxy(raw_proxy)
-            print(
-                f"   🔄 [{i}/{len(proxies_to_try)}] "
-                f"{proxy}"
-            )
+        # Method 2: iOS client
+        print(f"   🔄 Method 2: iOS client...")
+        result = self._try_download(
+            video_url, video_id, output_path,
+            client='ios'
+        )
+        if result:
+            return result
 
-            for client in ['android', 'ios']:
-                ydl_opts = {
-                    'format'         : (
-                        'bestaudio[ext=m4a]/bestaudio'
-                    ),
-                    'outtmpl'        : output_path,
-                    'quiet'          : True,
-                    'no_warnings'    : True,
-                    'proxy'          : proxy,
-                    'socket_timeout' : 10,
-                    'extractor_args' : {
-                        'youtube': {
-                            'player_client': [client],
-                        }
-                    },
-                    'postprocessors' : [{
-                        'key'            : 'FFmpegExtractAudio',
-                        'preferredcodec' : 'm4a',
-                    }],
-                }
+        # Method 3: Web client
+        print(f"   🔄 Method 3: Web client...")
+        result = self._try_download(
+            video_url, video_id, output_path,
+            client='web'
+        )
+        if result:
+            return result
 
-                result = self._try_download(
-                    ydl_opts, video_url, video_id
-                )
-                if result:
-                    return result
-
-        print(f"   ❌ All proxies failed")
+        print(f"   ❌ All methods failed")
         return None
 
-    def _try_download(self, ydl_opts, video_url, video_id):
+    def _try_download(
+        self, video_url, video_id,
+        output_path, client='android'
+    ):
+        """Try downloading with specific client"""
         try:
+            ydl_opts = {
+                'format'         : (
+                    'bestaudio[ext=m4a]/bestaudio'
+                ),
+                'outtmpl'        : output_path,
+                'quiet'          : True,
+                'no_warnings'    : True,
+                'cookiefile'     : 'cookies.txt',
+                'socket_timeout' : 30,
+                'extractor_args' : {
+                    'youtube': {
+                        'player_client': [client],
+                    }
+                },
+                'postprocessors' : [{
+                    'key'            : 'FFmpegExtractAudio',
+                    'preferredcodec' : 'm4a',
+                }],
+            }
+
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.extract_info(
                     video_url,
                     download=True
                 )
 
+            # Find audio file
             for ext in ['m4a', 'mp3', 'opus', 'webm', 'aac']:
                 path = os.path.join(
                     DOWNLOADS_DIR,
@@ -156,6 +108,7 @@ class VideoDownloader:
                     )
                     return path
 
+            # Search by video_id
             for f in os.listdir(DOWNLOADS_DIR):
                 if video_id in f and not f.endswith(
                     ('.jpg', '.png', '.webp', '.jpeg')
@@ -163,14 +116,6 @@ class VideoDownloader:
                     return os.path.join(DOWNLOADS_DIR, f)
 
         except Exception as e:
-            err = str(e)
-            if 'timeout' in err.lower():
-                print(f"   ⏰ Timeout")
-            elif 'Sign in' in err or 'bot' in err.lower():
-                print(f"   🤖 Bot detected")
-            elif 'Connection' in err:
-                print(f"   🔌 Connection failed")
-            else:
-                print(f"   ⚠️ {err[:60]}")
+            print(f"   ⚠️ {client}: {str(e)[:80]}")
 
         return None
