@@ -32,33 +32,14 @@ class VideoUploader:
                     ch_name = item.get(
                         "snippet", {}
                     ).get("title", "")
-                    print(
-                        f"   📺 Channel: "
-                        f"{ch_name} ({ch_id})"
-                    )
+                    print(f"   📺 {ch_name} ({ch_id})")
                     if ch_id == self.target_channel_id:
                         print(f"   ✅ Correct channel!")
                         return True
                 print(f"   ⚠️ Channel mismatch!")
-                return False
         except Exception as e:
-            print(f"   ⚠️ Verify error: {e}")
-            return False
-
-    def _get_region_restriction(self, video_info):
-        blocked = video_info.get("blocked_countries", [])
-        allowed = video_info.get("allowed_countries", [])
-        if blocked:
-            return (
-                {"regionRestriction": {"blocked": blocked}},
-                f"{len(blocked)} countries blocked"
-            )
-        elif allowed:
-            return (
-                {"regionRestriction": {"allowed": allowed}},
-                f"{len(allowed)} countries allowed"
-            )
-        return {}, "No restriction (worldwide)"
+            print(f"   ⚠️ {e}")
+        return False
 
     def upload_video(self, video_info):
         video_file = video_info.get("video_file")
@@ -68,43 +49,26 @@ class VideoUploader:
 
         title = video_info.get("title", "Relaxing Video")
         desc  = video_info.get("description", (
-            "🎵 Perfect for:\n"
+            "🎵 Perfect for Deep Sleep & Relaxation\n\n"
             "✅ Deep Sleep\n"
             "✅ Relaxation\n"
             "✅ Study & Focus\n"
             "✅ Meditation\n\n"
             "👍 Like & Subscribe!\n"
-            "🔔 Turn on notifications!\n\n"
-            "#sleep #relaxing #meditation #study"
+            "#sleep #relaxing #meditation"
         ))
 
-        restriction, region_desc = (
-            self._get_region_restriction(video_info)
-        )
-
-        print(f"\n📤 Uploading to YouTube")
-        print(f"   Target : {self.target_channel_id}")
-        print(f"   Title  : {title}")
-        print(f"   Region : {region_desc}")
-
-        print(f"\n🔍 Verifying channel...")
+        print(f"\n📤 Uploading: {title[:50]}")
         self._verify_channel()
 
         body = {
             "snippet": {
-                "title"               : title,
-                "description"         : desc,
-                "tags"                : [
-                    "sleep music",
-                    "relaxing music",
-                    "deep sleep",
-                    "meditation",
-                    "study music",
-                    "rain sounds",
-                    "white noise",
-                    "stress relief",
-                    "calm music",
-                    "sleep aid",
+                "title"      : title,
+                "description": desc,
+                "tags"       : [
+                    "sleep music", "relaxing",
+                    "deep sleep",  "meditation",
+                    "rain sounds", "white noise",
                 ],
                 "categoryId"          : DEFAULT_CATEGORY,
                 "defaultLanguage"     : DEFAULT_LANGUAGE,
@@ -117,11 +81,6 @@ class VideoUploader:
             }
         }
 
-        part = "snippet,status"
-        if restriction:
-            body["contentDetails"] = restriction
-            part = "snippet,status,contentDetails"
-
         media = MediaFileUpload(
             video_file,
             mimetype  = "video/mp4",
@@ -130,14 +89,13 @@ class VideoUploader:
 
         try:
             response = self.youtube.videos().insert(
-                part       = part,
+                part       = "snippet,status",
                 body       = body,
                 media_body = media
             ).execute()
 
             uploaded_id = response.get("id")
-            print(f"\n✅ Uploaded! ID: {uploaded_id}")
-            print(f"🔗 https://youtu.be/{uploaded_id}")
+            print(f"✅ Uploaded: https://youtu.be/{uploaded_id}")
 
             # Set thumbnail
             thumb = video_info.get("thumbnail_file")
@@ -147,12 +105,12 @@ class VideoUploader:
                         videoId    = uploaded_id,
                         media_body = MediaFileUpload(
                             thumb,
-                            mimetype = "image/jpeg"
+                            mimetype="image/jpeg"
                         )
                     ).execute()
                     print("🖼️ Thumbnail set!")
                 except Exception as e:
-                    print(f"⚠️ Thumbnail error: {e}")
+                    print(f"⚠️ Thumbnail: {e}")
 
             return {
                 "success" : True,
