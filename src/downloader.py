@@ -1,7 +1,6 @@
 """
 Video Downloader - Audio Only
-Uses BD/IN proxies from proxifly repo
-Same proxy system that worked for Gopal Bhar
+Uses proxies from ALL countries via proxifly
 """
 
 import os
@@ -19,26 +18,65 @@ DOWNLOADS_DIR = os.path.join(
 
 os.makedirs(DOWNLOADS_DIR, exist_ok=True)
 
+# All available country codes from proxifly
+PROXY_COUNTRIES = [
+    "BD", "IN", "SG", "US", "GB", "DE", "FR",
+    "NL", "CA", "AU", "JP", "KR", "BR", "AR",
+    "MX", "TR", "ID", "PH", "VN", "TH", "PK",
+    "NG", "KE", "ZA", "EG", "RU", "UA", "PL",
+    "CZ", "HU", "RO", "BG", "HR", "RS", "SK",
+    "AT", "CH", "SE", "NO", "DK", "FI", "PT",
+    "ES", "IT", "GR", "IL", "AE", "SA", "IR",
+    "HK", "TW", "MY", "MM", "KH", "LK", "NP",
+]
+
 
 class VideoDownloader:
 
     def __init__(self):
         self.proxies = []
 
-    # ─────────────────────────────────────────────
-    # Load BD/IN Proxies
-    # ─────────────────────────────────────────────
     def _load_proxies(self):
-        sources = [
-            "https://raw.githubusercontent.com/proxifly/"
-            "free-proxy-list/main/proxies/countries/BD/data.txt",
-            "https://raw.githubusercontent.com/proxifly/"
-            "free-proxy-list/main/proxies/countries/IN/data.txt",
-        ]
+        """Load proxies from ALL countries"""
+        print(f"   🌍 Loading proxies from all countries...")
 
+        # First try the main proxy list
         all_proxies = []
-        for url in sources:
+
+        # Try main proxifly list
+        try:
+            r = requests.get(
+                "https://raw.githubusercontent.com/proxifly/"
+                "free-proxy-list/main/proxies/all/data.txt",
+                timeout=15
+            )
+            if r.status_code == 200:
+                lines = [
+                    l.strip()
+                    for l in r.text.splitlines()
+                    if l.strip() and
+                    not l.startswith('#')
+                ]
+                all_proxies.extend(lines)
+                print(
+                    f"   ✅ Main list: "
+                    f"{len(lines)} proxies"
+                )
+        except Exception as e:
+            print(f"   ⚠️ Main list failed: {e}")
+
+        # Also load from specific countries
+        priority_countries = [
+            "BD", "IN", "SG", "ID",
+            "PH", "VN", "TH", "MY"
+        ]
+        for country in priority_countries:
             try:
+                url = (
+                    f"https://raw.githubusercontent.com/"
+                    f"proxifly/free-proxy-list/main/"
+                    f"proxies/countries/{country}/data.txt"
+                )
                 r = requests.get(url, timeout=10)
                 if r.status_code == 200:
                     lines = [
@@ -48,130 +86,78 @@ class VideoDownloader:
                         not l.startswith('#')
                     ]
                     all_proxies.extend(lines)
-                    print(
-                        f"   📦 Loaded {len(lines)} "
-                        f"proxies from {url.split('/')[-2]}"
-                    )
-            except Exception as e:
-                print(f"   ⚠️ Proxy load error: {e}")
-
-        random.shuffle(all_proxies)
-        self.proxies = all_proxies
-        print(f"   📦 Total proxies: {len(all_proxies)}")
-
-    # ─────────────────────────────────────────────
-    # Get Working Proxy
-    # ─────────────────────────────────────────────
-    def _get_working_proxy(self):
-        if not self.proxies:
-            self._load_proxies()
-
-        print(f"   🔍 Testing proxies...")
-
-        for p in self.proxies[:20]:
-            proxy = f"http://{p}" if not p.startswith('http') \
-                    else p
-            try:
-                r = requests.get(
-                    "https://www.youtube.com",
-                    proxies={
-                        "http" : proxy,
-                        "https": proxy
-                    },
-                    timeout  = 5,
-                    headers  = {"User-Agent": "Mozilla/5.0"}
-                )
-                if r.status_code in (200, 403):
-                    print(f"   ✅ Working proxy: {proxy}")
-                    return proxy
             except Exception:
                 continue
 
-        # Use random if none tested
-        if self.proxies:
-            p = random.choice(self.proxies)
-            proxy = f"http://{p}" if not p.startswith('http') \
-                    else p
-            print(f"   🎲 Random proxy: {proxy}")
+        random.shuffle(all_proxies)
+        self.proxies = all_proxies
+        print(
+            f"   📦 Total proxies loaded: "
+            f"{len(all_proxies)}"
+        )
+        return all_proxies
+
+    def _format_proxy(self, proxy):
+        """Format proxy URL"""
+        if not proxy:
+            return None
+        if proxy.startswith('http') or \
+           proxy.startswith('socks'):
             return proxy
+        return f"http://{proxy}"
 
-        return None
-
-    # ─────────────────────────────────────────────
-    # Download Audio
-    # ─────────────────────────────────────────────
     def download_audio(self, video_url, video_id):
-        print(f"   🎵 Downloading audio: {video_id}")
+        """Download audio using rotating proxies"""
+        print(f"   🎵 Downloading: {video_id}")
+
+        if not self.proxies:
+            self._load_proxies()
 
         output_path = os.path.join(
             DOWNLOADS_DIR,
             f"{video_id}.%(ext)s"
         )
 
-        proxy = self._get_working_proxy()
+        # Try up to 20 different proxies
+        proxies_to_try = self.proxies[:20]
 
-        # Method 1: Android + Proxy
-        print(f"   🔄 Method 1: Android client + proxy")
-        ydl_opts = {
-            'format'         : 'bestaudio[ext=m4a]/bestaudio',
-            'outtmpl'        : output_path,
-            'quiet'          : True,
-            'no_warnings'    : True,
-            'extractor_args' : {
-                'youtube': {
-                    'player_client': ['android'],
+        for i, raw_proxy in enumerate(proxies_to_try, 1):
+            proxy = self._format_proxy(raw_proxy)
+            print(
+                f"   🔄 [{i}/{len(proxies_to_try)}] "
+                f"{proxy}"
+            )
+
+            for client in ['android', 'ios']:
+                ydl_opts = {
+                    'format'         : (
+                        'bestaudio[ext=m4a]/bestaudio'
+                    ),
+                    'outtmpl'        : output_path,
+                    'quiet'          : True,
+                    'no_warnings'    : True,
+                    'proxy'          : proxy,
+                    'socket_timeout' : 30,
+                    'extractor_args' : {
+                        'youtube': {
+                            'player_client': [client],
+                        }
+                    },
+                    'postprocessors' : [{
+                        'key'            : 'FFmpegExtractAudio',
+                        'preferredcodec' : 'm4a',
+                    }],
                 }
-            },
-            'postprocessors' : [{
-                'key'            : 'FFmpegExtractAudio',
-                'preferredcodec' : 'm4a',
-            }],
-        }
 
-        if proxy:
-            ydl_opts['proxy'] = proxy
+                result = self._try_download(
+                    ydl_opts, video_url, video_id
+                )
+                if result:
+                    return result
 
-        result = self._try_download(
-            ydl_opts, video_url, video_id
-        )
-        if result:
-            return result
-
-        # Method 2: iOS + Proxy
-        print(f"   🔄 Method 2: iOS client + proxy")
-        ydl_opts['extractor_args'] = {
-            'youtube': {
-                'player_client': ['ios'],
-            }
-        }
-        result = self._try_download(
-            ydl_opts, video_url, video_id
-        )
-        if result:
-            return result
-
-        # Method 3: New proxy + Android
-        print(f"   🔄 Method 3: Fresh proxy + Android")
-        new_proxy = self._get_working_proxy()
-        if new_proxy:
-            ydl_opts['proxy'] = new_proxy
-        ydl_opts['extractor_args'] = {
-            'youtube': {
-                'player_client': ['android'],
-            }
-        }
-        result = self._try_download(
-            ydl_opts, video_url, video_id
-        )
-        if result:
-            return result
-
-        print(f"   ❌ All methods failed")
+        print(f"   ❌ All proxies failed")
         return None
 
-    # ─────────────────────────────────────────────
-    # Try Download
-    # ─────────────────────────────────────────────
     def _try_download(self, ydl_opts, video_url, video_id):
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -180,7 +166,6 @@ class VideoDownloader:
                     download=True
                 )
 
-            # Find audio file
             for ext in ['m4a', 'mp3', 'opus', 'webm', 'aac']:
                 path = os.path.join(
                     DOWNLOADS_DIR,
@@ -189,19 +174,24 @@ class VideoDownloader:
                 if os.path.exists(path):
                     size = os.path.getsize(path)
                     print(
-                        f"   ✅ Audio: "
+                        f"   ✅ Downloaded: "
                         f"{size // 1024 // 1024} MB"
                     )
                     return path
 
-            # Search by video_id
             for f in os.listdir(DOWNLOADS_DIR):
                 if video_id in f and not f.endswith(
-                    ('.jpg', '.png', '.webp')
+                    ('.jpg', '.png', '.webp', '.jpeg')
                 ):
                     return os.path.join(DOWNLOADS_DIR, f)
 
         except Exception as e:
-            print(f"   ⚠️ Error: {e}")
+            err = str(e)
+            if 'Sign in' in err or 'bot' in err.lower():
+                print(f"   ⚠️ Bot detected")
+            elif 'timeout' in err.lower():
+                print(f"   ⚠️ Timeout")
+            else:
+                print(f"   ⚠️ {err[:80]}")
 
         return None
