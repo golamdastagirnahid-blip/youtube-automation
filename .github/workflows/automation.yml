@@ -42,9 +42,12 @@ jobs:
       - name: Install Dependencies
         shell: powershell
         run: |
-          C:\Python312\python.exe -m pip install --upgrade pip
-          C:\Python312\python.exe -m pip install -U yt-dlp
-          C:\Python312\python.exe -m pip install -r requirements.txt
+          C:\Python312\python.exe -m pip install `
+            -U yt-dlp `
+            --quiet
+          C:\Python312\python.exe -m pip install `
+            -r requirements.txt `
+            --quiet
           Write-Host "✅ Dependencies ready"
           C:\Python312\python.exe -m yt_dlp --version
 
@@ -90,6 +93,11 @@ jobs:
           echo "VIDEO_URL=$VIDEO_URL"         >> $env:GITHUB_ENV
           echo "VIDEO_TITLE=$VIDEO_TITLE"     >> $env:GITHUB_ENV
           echo "VIDEO_PRIVACY=$VIDEO_PRIVACY" >> $env:GITHUB_ENV
+          Write-Host "✅ Variables set"
+          Write-Host "   ID     : $VIDEO_ID"
+          Write-Host "   URL    : $VIDEO_URL"
+          Write-Host "   Title  : $VIDEO_TITLE"
+          Write-Host "   Privacy: $VIDEO_PRIVACY"
 
       - name: Show Video Info
         shell: powershell
@@ -118,7 +126,8 @@ jobs:
 
       - name: Run Automation
         shell: powershell
-        run: C:\Python312\python.exe main.py run
+        run: |
+          C:\Python312\python.exe main.py run
         env:
           VIDEO_ID:           ${{ env.VIDEO_ID }}
           VIDEO_URL:          ${{ env.VIDEO_URL }}
@@ -137,16 +146,23 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             git commit -m "Update DB [skip ci]"
             git push
+            Write-Host "✅ Database saved"
+          } else {
+            Write-Host "✅ No changes to save"
           }
-          Write-Host "✅ Database saved"
 
       - name: Cleanup
         if: always()
         shell: powershell
         run: |
-          Remove-Item -Recurse -Force downloads  -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force processed  -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force thumbnails -ErrorAction SilentlyContinue
-          Remove-Item -Force token.json          -ErrorAction SilentlyContinue
-          Remove-Item -Force client_secrets.json -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force downloads `
+            -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force processed `
+            -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force thumbnails `
+            -ErrorAction SilentlyContinue
+          Remove-Item -Force token.json `
+            -ErrorAction SilentlyContinue
+          Remove-Item -Force client_secrets.json `
+            -ErrorAction SilentlyContinue
           Write-Host "✅ Cleanup done"
