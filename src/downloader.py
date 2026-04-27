@@ -39,7 +39,6 @@ COOKIES_OK = _cookies_valid()
 
 
 class ProgressLogger:
-    """Logs download progress for large files"""
 
     def __init__(self):
         self.last_pct = -1
@@ -68,9 +67,9 @@ class ProgressLogger:
                         if eta else "..."
                     )
                     print(
-                        f"   📥 {pct}% — "
+                        f"   DL {pct}% - "
                         f"{dl_mb:.0f}/{tot_mb:.0f} MB "
-                        f"@ {spd} — ETA {eta_str}"
+                        f"@ {spd} - ETA {eta_str}"
                     )
                     sys.stdout.flush()
 
@@ -79,22 +78,67 @@ class ProgressLogger:
                 'downloaded_bytes', 0
             )
             mb = size / 1024 / 1024
-            print(f"   📥 100% — {mb:.0f} MB download complete")
+            print(f"   DL 100% - {mb:.0f} MB download complete")
             sys.stdout.flush()
 
 
 class VideoDownloader:
 
-    def download_audio(self, video_url, video_id):
-        print(f"   🎵 Downloading: {video_id}")
-        if HAS_FFMPEG:
-            print(f"   ✅ FFmpeg found — will convert to m4a")
-        else:
-            print(f"   ⚠️ FFmpeg not found — will use raw audio")
+    def _list_formats(self, video_url):
+        """Show what formats yt-dlp can see — helps debug failures."""
+        opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'skip_download': True,
+            'noplaylist': True,
+            'socket_timeout': 30,
+        }
         if COOKIES_OK:
-            print(f"   ✅ Cookies loaded")
+            opts['cookiefile'] = COOKIES_FILE
+
+        for client in [None, 'android_vr']:
+            if client:
+                opts['extractor_args'] = {
+                    'youtube': {'player_client': [client]}
+                }
+            try:
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    info = ydl.extract_info(
+                        video_url, download=False
+                    )
+                    fmts = info.get('formats', [])
+                    if fmts:
+                        client_name = client or 'auto'
+                        print(f"   Formats ({client_name}): {len(fmts)} found")
+                        audio_fmts = [
+                            f for f in fmts
+                            if f.get('acodec', 'none') != 'none'
+                        ]
+                        print(f"   Audio streams: {len(audio_fmts)}")
+                        for f in audio_fmts[:5]:
+                            ext = f.get('ext', '?')
+                            abr = f.get('abr', '?')
+                            fid = f.get('format_id', '?')
+                            print(f"     - {fid}: {ext} {abr}kbps")
+                        return True
+            except Exception as e:
+                err = str(e)[:200]
+                client_name = client or 'auto'
+                print(f"   Format check ({client_name}): {err}")
+        return False
+
+    def download_audio(self, video_url, video_id):
+        print(f"   Downloading: {video_id}")
+        if HAS_FFMPEG:
+            print(f"   FFmpeg found - will convert to m4a")
         else:
-            print(f"   ⚠️ No valid cookies — YouTube may block")
+            print(f"   FFmpeg not found - will use raw audio")
+        if COOKIES_OK:
+            print(f"   Cookies loaded")
+        else:
+            print(f"   No valid cookies - YouTube may block")
+
+        self._list_formats(video_url)
 
         output_path = os.path.join(
             DOWNLOADS_DIR,
@@ -102,38 +146,36 @@ class VideoDownloader:
         )
 
         methods = [
-            ("Auto + cookies", None, True, False),
-            ("Android + cookies", 'android', True, False),
-            ("Android VR + cookies", 'android_vr', True, False),
-            ("Media Connect + cookies", 'mediaconnect', True, False),
-            ("Any format + cookies", 'android', True, True),
+            ("Auto audio", None, True, 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio'),
+            ("Android audio", 'android', True, 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio'),
+            ("Android VR audio", 'android_vr', True, 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio'),
+            ("MediaConnect audio", 'mediaconnect', True, 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio'),
+            ("Auto best", None, True, 'bestaudio/best'),
+            ("Android VR best", 'android_vr', True, 'bestaudio/best'),
+            ("Auto any", None, True, 'best'),
+            ("Android VR any", 'android_vr', True, 'best'),
         ]
 
-        for i, (name, client, cookies, any_fmt) in enumerate(methods, 1):
-            print(f"   🔄 Method {i}: {name}...")
+        for i, (name, client, cookies, fmt) in enumerate(methods, 1):
+            print(f"   Method {i}/{len(methods)}: {name}...")
             result = self._try_download(
                 video_url, video_id,
                 output_path, client=client,
                 use_cookies=cookies,
-                any_format=any_fmt,
+                fmt=fmt,
             )
             if result:
                 return result
 
-        print(f"   ❌ All download methods failed")
+        print(f"   ALL {len(methods)} download methods failed")
         return None
 
     def _try_download(
         self, video_url, video_id,
         output_path, client=None,
-        use_cookies=False, any_format=False
+        use_cookies=False, fmt='bestaudio/best'
     ):
         try:
-            if any_format:
-                fmt = 'best'
-            else:
-                fmt = 'bestaudio[ext=m4a]/bestaudio/best'
-
             progress = ProgressLogger()
 
             ydl_opts = {
@@ -158,7 +200,7 @@ class VideoDownloader:
                 'nopart'           : False,
             }
 
-            if HAS_FFMPEG:
+            if HAS_FFMPEG and fmt != 'best':
                 ydl_opts['postprocessors'] = [{
                     'key'           : 'FFmpegExtractAudio',
                     'preferredcodec': 'm4a',
@@ -186,22 +228,27 @@ class VideoDownloader:
             err = str(e)
             client_name = client or 'auto'
             if 'No video formats found' in err:
-                print(f"   ⚠️ {client_name}: No formats (PO token needed)")
+                print(f"     {client_name}: No formats found")
+            elif 'Requested format is not available' in err:
+                print(f"     {client_name}: Format '{fmt}' not available")
             elif 'HTTP Error 403' in err:
-                print(f"   ⚠️ {client_name}: 403 Forbidden (blocked)")
+                print(f"     {client_name}: 403 Forbidden")
             elif 'HTTP Error 429' in err:
-                print(f"   ⚠️ {client_name}: Rate limited")
-            elif 'Sign in' in err or 'login' in err.lower():
-                print(f"   ⚠️ {client_name}: Login required")
+                print(f"     {client_name}: Rate limited")
+            elif 'Sign in' in err or 'login' in err.lower() or 'bot' in err.lower():
+                print(f"     {client_name}: Login/cookies required")
+            elif 'ffmpeg' in err.lower() or 'postprocess' in err.lower():
+                print(f"     {client_name}: FFmpeg/postprocessor error: {err[:200]}")
             else:
-                print(f"   ⚠️ {client_name}: {err[:200]}")
+                print(f"     {client_name}: {err[:300]}")
 
         return None
 
     def _find_downloaded(self, video_id):
         for ext in [
             'm4a', 'mp3', 'opus', 'webm',
-            'aac', 'ogg', 'mp4'
+            'aac', 'ogg', 'mp4', 'mkv',
+            'wav', 'flac'
         ]:
             path = os.path.join(
                 DOWNLOADS_DIR,
@@ -210,15 +257,15 @@ class VideoDownloader:
             if os.path.exists(path):
                 size = os.path.getsize(path)
                 if size < 1024:
-                    print(f"   ⚠️ File too small ({size}B), skipping")
+                    print(f"   File too small ({size}B), skipping")
                     os.remove(path)
                     continue
                 gb = size / 1024 / 1024 / 1024
                 if gb >= 1.0:
-                    print(f"   ✅ Downloaded: {gb:.2f} GB")
+                    print(f"   Downloaded: {gb:.2f} GB")
                 else:
                     mb = size / 1024 / 1024
-                    print(f"   ✅ Downloaded: {mb:.1f} MB")
+                    print(f"   Downloaded: {mb:.1f} MB")
                 return path
 
         for f in os.listdir(DOWNLOADS_DIR):
@@ -231,10 +278,10 @@ class VideoDownloader:
                 if size > 1024:
                     gb = size / 1024 / 1024 / 1024
                     if gb >= 1.0:
-                        print(f"   ✅ Downloaded: {gb:.2f} GB")
+                        print(f"   Downloaded: {gb:.2f} GB")
                     else:
                         mb = size / 1024 / 1024
-                        print(f"   ✅ Downloaded: {mb:.1f} MB")
+                        print(f"   Downloaded: {mb:.1f} MB")
                     return fpath
 
         return None
