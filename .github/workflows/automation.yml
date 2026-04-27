@@ -197,11 +197,16 @@ jobs:
                 "$env:USERPROFILE\.yt-dlp\plugins"
               )
               foreach ($dest in $destDirs) {
+                # Skip if source and destination are the same
+                if ($loc -eq $dest) {
+                  Write-Host "  Skipping: source and destination are the same"
+                  continue
+                }
                 if (-not (Test-Path $dest)) {
                   New-Item -ItemType Directory -Path $dest -Force | Out-Null
                 }
                 Copy-Item -Path $loc -Destination $dest -Recurse -Force
-                Write-Host "Copied to: $dest"
+                Write-Host "  Copied to: $dest"
               }
             }
           }
