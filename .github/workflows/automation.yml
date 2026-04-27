@@ -177,6 +177,35 @@ jobs:
             exit 1
           }
 
+      - name: Alternative Plugin Setup (2026 Bypass)
+        shell: powershell
+        run: |
+          Write-Host "Setting up alternative plugin location..."
+          # Try multiple plugin locations
+          $locations = @(
+            "C:\Python312\Lib\site-packages\yt_dlp_plugins",
+            "C:\Python312\yt-dlp-plugins",
+            "$env:APPDATA\yt-dlp\plugins\yt_dlp_plugins"
+          )
+          foreach ($loc in $locations) {
+            if (Test-Path $loc) {
+              Write-Host "Found plugin at: $loc"
+              # Copy to all possible yt-dlp plugin locations
+              $destDirs = @(
+                "$env:APPDATA\yt-dlp\plugins",
+                "C:\Python312\yt-dlp-plugins",
+                "$env:USERPROFILE\.yt-dlp\plugins"
+              )
+              foreach ($dest in $destDirs) {
+                if (-not (Test-Path $dest)) {
+                  New-Item -ItemType Directory -Path $dest -Force | Out-Null
+                }
+                Copy-Item -Path $loc -Destination $dest -Recurse -Force
+                Write-Host "Copied to: $dest"
+              }
+            }
+          }
+
       - name: Setup Cookies
         shell: powershell
         env:

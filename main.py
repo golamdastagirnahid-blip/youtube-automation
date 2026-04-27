@@ -198,7 +198,7 @@ class YouTubeAutomation:
             'format'        : None,
             'noplaylist'    : True,
             'socket_timeout': 30,
-            # Enable PO Token provider
+            # Enable PO Token provider (2026 bypass method)
             'extractor_args': {
                 'youtube': {
                     'player_client': [client] if client else ['web'],
@@ -209,6 +209,7 @@ class YouTubeAutomation:
             },
         }
 
+        # Always use cookies as fallback (2026 bypass method)
         if cookie_file:
             ydl_opts['cookiefile'] = cookie_file
 
@@ -255,7 +256,7 @@ class YouTubeAutomation:
             if 'live' in err.lower():
                 return -1
             if 'bot' in err.lower() or 'Sign in' in err:
-                print(f"   {client_name}: bot detection (PO token may not be working)")
+                print(f"   {client_name}: bot detection - trying next method")
             else:
                 print(f"   {client_name}: {err[:200]}")
             return None

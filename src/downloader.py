@@ -151,7 +151,7 @@ class VideoDownloader:
                 'http_chunk_size'  : 10 * 1024 * 1024,
                 'continuedl'       : True,
                 'nopart'           : False,
-                # Enable PO Token provider
+                # Enable PO Token provider (2026 bypass method)
                 'extractor_args': {
                     'youtube': {
                         'player_client': [client] if client else ['web'],
@@ -168,7 +168,8 @@ class VideoDownloader:
                     'preferredcodec': 'm4a',
                 }]
 
-            if use_cookies and COOKIES_OK:
+            # Always use cookies as fallback (2026 bypass method)
+            if COOKIES_OK:
                 ydl_opts['cookiefile'] = COOKIES_FILE
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -191,7 +192,7 @@ class VideoDownloader:
             elif 'HTTP Error 429' in err:
                 print(f"     {client_name}: Rate limited")
             elif 'Sign in' in err or 'bot' in err.lower():
-                print(f"     {client_name}: Bot detection - PO token may not be working")
+                print(f"     {client_name}: Bot detection - trying next method")
             elif 'ffmpeg' in err.lower() or 'postprocess' in err.lower():
                 print(f"     {client_name}: FFmpeg error: {err[:200]}")
             else:
