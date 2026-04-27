@@ -45,15 +45,13 @@ jobs:
           $ErrorActionPreference = "Continue"
           $ffmpegExe = "C:\Python312\ffmpeg.exe"
           if (Test-Path $ffmpegExe) {
-            Write-Host "FFmpeg already installed at $ffmpegExe"
+            Write-Host "FFmpeg already installed"
           } else {
-            Write-Host "FFmpeg not found - installing..."
+            Write-Host "Installing FFmpeg..."
             $zipUrl = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
             $zipFile = Join-Path $env:TEMP "ffmpeg.zip"
             $extractDir = Join-Path $env:TEMP "ffmpeg_extract"
-            Write-Host "Downloading FFmpeg..."
             Invoke-WebRequest -Uri $zipUrl -OutFile $zipFile -UseBasicParsing
-            Write-Host "Extracting..."
             if (Test-Path $extractDir) { Remove-Item -Recurse -Force $extractDir }
             Expand-Archive -Path $zipFile -DestinationPath $extractDir -Force
             $binDir = Get-ChildItem -Path $extractDir -Recurse -Directory -Filter "bin" | Select-Object -First 1
@@ -61,25 +59,87 @@ jobs:
               $dest = "C:\Python312"
               Copy-Item (Join-Path $binDir.FullName "ffmpeg.exe") -Destination $dest -Force
               Copy-Item (Join-Path $binDir.FullName "ffprobe.exe") -Destination $dest -Force
-              Write-Host "FFmpeg copied to $dest"
+              Write-Host "FFmpeg installed"
             } else {
-              Write-Host "ERROR: Could not find ffmpeg bin directory"
-              exit 1
+              Write-Host "ERROR: ffmpeg bin not found"; exit 1
             }
             Remove-Item $zipFile -Force -ErrorAction SilentlyContinue
             Remove-Item -Recurse -Force $extractDir -ErrorAction SilentlyContinue
           }
-          if (Test-Path $ffmpegExe) {
-            Write-Host "FFmpeg OK"
+          if (-not (Test-Path $ffmpegExe)) { Write-Host "ERROR: ffmpeg missing"; exit 1 }
+          Write-Host "FFmpeg OK"
+
+      - name: Install Node.js
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Continue"
+          $nodeExe = Get-Command node -ErrorAction SilentlyContinue
+          if ($nodeExe) {
+            Write-Host "Node.js already installed: $(node --version)"
           } else {
-            Write-Host "ERROR: ffmpeg.exe not found after install"
-            exit 1
+            Write-Host "Installing Node.js..."
+            $nodeUrl = "https://nodejs.org/dist/v22.15.0/node-v22.15.0-win-x64.zip"
+            $zipFile = Join-Path $env:TEMP "nodejs.zip"
+            $extractDir = "C:\nodejs"
+            Invoke-WebRequest -Uri $nodeUrl -OutFile $zipFile -UseBasicParsing
+            if (Test-Path $extractDir) { Remove-Item -Recurse -Force $extractDir }
+            Expand-Archive -Path $zipFile -DestinationPath $env:TEMP -Force
+            $nodeDir = Get-ChildItem -Path $env:TEMP -Directory -Filter "node-v*" | Select-Object -First 1
+            if ($nodeDir) {
+              Move-Item $nodeDir.FullName $extractDir -Force
+              $currentPath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+              if ($currentPath -notlike "*C:\nodejs*") {
+                [Environment]::SetEnvironmentVariable("Path", "$currentPath;C:\nodejs", "Machine")
+              }
+              $env:Path = "$env:Path;C:\nodejs"
+              Write-Host "Node.js installed: $(C:\nodejs\node.exe --version)"
+            } else {
+              Write-Host "ERROR: Node.js extraction failed"; exit 1
+            }
+            Remove-Item $zipFile -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Install PO Token Server
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Continue"
+          $env:Path = "$env:Path;C:\nodejs"
+          $potDir = "C:\pot-server"
+          if (Test-Path (Join-Path $potDir "server\build\main.js")) {
+            Write-Host "PO Token server already built"
+          } else {
+            Write-Host "Setting up PO Token server..."
+            if (Test-Path $potDir) { Remove-Item -Recurse -Force $potDir }
+            git clone --depth 1 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git $potDir
+            Set-Location (Join-Path $potDir "server")
+            C:\nodejs\npm.cmd ci --silent
+            C:\nodejs\npx.cmd tsc
+            Write-Host "PO Token server built"
+          }
+
+      - name: Start PO Token Server
+        shell: powershell
+        run: |
+          $env:Path = "$env:Path;C:\nodejs"
+          $serverScript = "C:\pot-server\server\build\main.js"
+          if (-not (Test-Path $serverScript)) {
+            Write-Host "ERROR: PO Token server not found"; exit 1
+          }
+          Write-Host "Starting PO Token server on port 4416..."
+          Start-Process -NoNewWindow -FilePath "C:\nodejs\node.exe" -ArgumentList $serverScript
+          Start-Sleep -Seconds 5
+          try {
+            $response = Invoke-WebRequest -Uri "http://127.0.0.1:4416" -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+            Write-Host "PO Token server running (status: $($response.StatusCode))"
+          } catch {
+            Write-Host "PO Token server started (no health endpoint, but process is running)"
           }
 
       - name: Install Dependencies
         shell: powershell
         run: |
           C:\Python312\python.exe -m pip install -U yt-dlp --quiet
+          C:\Python312\python.exe -m pip install -U bgutil-ytdlp-pot-provider --quiet
           C:\Python312\python.exe -m pip install -r requirements.txt --quiet
           C:\Python312\python.exe -m yt_dlp --version
 
@@ -88,24 +148,14 @@ jobs:
         env:
           COOKIES_DATA: ${{ secrets.COOKIES_TXT }}
         run: |
-          if (-not $env:COOKIES_DATA) {
-            Write-Host "WARNING: COOKIES_TXT secret is empty!"
-          } else {
+          if ($env:COOKIES_DATA) {
             [System.IO.File]::WriteAllText(
               (Join-Path $PWD "cookies.txt"),
               $env:COOKIES_DATA
             )
-            $size = (Get-Item "cookies.txt").Length
-            $firstLine = (Get-Content "cookies.txt" -First 1)
-            $lineCount = (Get-Content "cookies.txt").Count
-            Write-Host "Cookies: $size bytes, $lineCount lines"
-            Write-Host "First line: $firstLine"
-            if ($firstLine -like "*Netscape*") {
-              Write-Host "Format: valid Netscape"
-            } else {
-              Write-Host "WARNING: Not Netscape format - cookies may not work"
-              Write-Host "Expected first line: # Netscape HTTP Cookie File"
-            }
+            Write-Host "Cookies: backup loaded (PO tokens are primary auth)"
+          } else {
+            Write-Host "No cookies (not needed - PO tokens handle auth)"
           }
 
       - name: Create Credentials
@@ -153,38 +203,30 @@ jobs:
           }
           if (-not $VIDEO_PRIVACY) { $VIDEO_PRIVACY = "public" }
           if (-not $VIDEO_TITLE)   { $VIDEO_TITLE   = "Relaxing Video" }
-          # Clean video ID: strip URL params like &t=26s
           if ($VIDEO_ID -match "^([a-zA-Z0-9_-]+)") {
             $VIDEO_ID = $Matches[1]
           }
-          # Clean video URL: remove timestamp params
           $VIDEO_URL = $VIDEO_URL -replace '[&?]t=[^&]*', ''
           echo "VIDEO_ID=$VIDEO_ID"           >> $env:GITHUB_ENV
           echo "VIDEO_URL=$VIDEO_URL"         >> $env:GITHUB_ENV
           echo "VIDEO_TITLE=$VIDEO_TITLE"     >> $env:GITHUB_ENV
           echo "VIDEO_PRIVACY=$VIDEO_PRIVACY" >> $env:GITHUB_ENV
-          Write-Host "Video ID (cleaned): $VIDEO_ID"
-          Write-Host "Video URL (cleaned): $VIDEO_URL"
+          Write-Host "Video ID: $VIDEO_ID"
+          Write-Host "Video URL: $VIDEO_URL"
 
-      - name: Show Video Info
-        shell: powershell
-        run: |
-          Write-Host "Video ID: ${{ env.VIDEO_ID }}"
-          Write-Host "Video URL: ${{ env.VIDEO_URL }}"
-          Write-Host "Title: ${{ env.VIDEO_TITLE }}"
-          Write-Host "Privacy: ${{ env.VIDEO_PRIVACY }}"
-
-      - name: Test YouTube Access
+      - name: Test Setup
         shell: powershell
         run: |
           $env:PYTHONIOENCODING = "utf-8"
-          C:\Python312\python.exe -c "import yt_dlp; print('yt-dlp OK')"
+          C:\Python312\python.exe -c "import yt_dlp; print('yt-dlp', yt_dlp.version.__version__)"
+          C:\Python312\python.exe -c "import bgutil_ytdlp_pot_provider; print('PO Token plugin loaded')"
           Write-Host "FFmpeg: $(Test-Path C:\Python312\ffmpeg.exe)"
 
       - name: Run Automation
         shell: powershell
         run: |
           $env:PYTHONIOENCODING = "utf-8"
+          $env:Path = "$env:Path;C:\nodejs"
           C:\Python312\python.exe main.py run
         env:
           VIDEO_ID:           ${{ env.VIDEO_ID }}
@@ -213,6 +255,8 @@ jobs:
         if: always()
         shell: powershell
         run: |
+          $ErrorActionPreference = "Continue"
+          Get-Process -Name "node" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
           Remove-Item -Recurse -Force downloads -ErrorAction SilentlyContinue
           Remove-Item -Recurse -Force processed -ErrorAction SilentlyContinue
           Remove-Item -Recurse -Force thumbnails -ErrorAction SilentlyContinue

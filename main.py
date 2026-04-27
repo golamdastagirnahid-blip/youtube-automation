@@ -259,7 +259,7 @@ class YouTubeAutomation:
     def get_video_info(self, video_url):
         cookie_file = self._load_cookies()
 
-        clients = [None, 'android_vr', 'android', 'mediaconnect']
+        clients = ['web', None, 'android_vr', 'android', 'ios', 'mediaconnect']
 
         for client in clients:
             client_name = client or 'auto'
