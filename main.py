@@ -168,7 +168,27 @@ class YouTubeAutomation:
     # ─────────────────────────────────────────────
     # Get Video Info
     # ─────────────────────────────────────────────
-    def get_video_info(self, video_url):
+    def _load_cookies(self):
+        cookie_file = "cookies.txt"
+        if not os.path.exists(cookie_file):
+            print("   Cookies: file not found")
+            return None
+        try:
+            with open(cookie_file, "r") as f:
+                head = f.read(500)
+            size = os.path.getsize(cookie_file)
+            if "Netscape" in head or "\t" in head:
+                print(f"   Cookies: loaded ({size} bytes)")
+                return cookie_file
+            else:
+                print(f"   Cookies: invalid format (not Netscape)")
+                print(f"   First 100 chars: {repr(head[:100])}")
+                return None
+        except Exception as e:
+            print(f"   Cookies: error reading - {e}")
+            return None
+
+    def _try_get_info(self, video_url, client=None, cookie_file=None):
         import yt_dlp
 
         ydl_opts = {
@@ -180,25 +200,27 @@ class YouTubeAutomation:
             'socket_timeout': 30,
         }
 
-        if os.path.exists("cookies.txt"):
-            try:
-                with open("cookies.txt", "r") as f:
-                    head = f.read(500)
-                if "Netscape" in head or "\t" in head:
-                    ydl_opts['cookiefile'] = 'cookies.txt'
-            except Exception:
-                pass
+        if client:
+            ydl_opts['extractor_args'] = {
+                'youtube': {'player_client': [client]}
+            }
+
+        if cookie_file:
+            ydl_opts['cookiefile'] = cookie_file
+
+        client_name = client or 'auto'
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(
                     video_url,
-                    download = False,
-                    process  = False
+                    download=False,
+                    process=False
                 )
 
                 if not info:
-                    return 0
+                    print(f"   {client_name}: no info returned")
+                    return None
 
                 is_live     = info.get('is_live', False)
                 live_status = info.get('live_status', '')
@@ -218,85 +240,36 @@ class YouTubeAutomation:
                 duration = info.get('duration', 0)
 
                 if not duration or duration == 0:
-                    print(f"   No duration found")
-                    return 0
+                    print(f"   {client_name}: no duration in metadata")
+                    return None
 
-                print(
-                    f"   Duration: "
-                    f"{self.format_duration(duration)}"
-                )
+                print(f"   Duration: {self.format_duration(duration)} (via {client_name})")
                 return duration
 
         except Exception as e:
             err = str(e)
             if 'live' in err.lower():
                 return -1
-            print(f"Info error: {e}")
+            if 'bot' in err.lower() or 'Sign in' in err:
+                print(f"   {client_name}: bot detection (cookies may be expired)")
+            else:
+                print(f"   {client_name}: {err[:200]}")
+            return None
 
-        print(f"   Fallback: android_vr client...")
-        ydl_opts_fallback = {
-            'quiet'          : True,
-            'no_warnings'    : True,
-            'skip_download'  : True,
-            'format'         : None,
-            'noplaylist'     : True,
-            'socket_timeout' : 30,
-            'extractor_args' : {
-                'youtube': {
-                    'player_client': ['android_vr'],
-                }
-            },
-        }
+    def get_video_info(self, video_url):
+        cookie_file = self._load_cookies()
 
-        if os.path.exists("cookies.txt"):
-            try:
-                with open("cookies.txt", "r") as f:
-                    head = f.read(500)
-                if "Netscape" in head or "\t" in head:
-                    ydl_opts_fallback['cookiefile'] = 'cookies.txt'
-            except Exception:
-                pass
+        clients = [None, 'android_vr', 'android', 'mediaconnect']
 
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts_fallback) as ydl:
-                info = ydl.extract_info(
-                    video_url,
-                    download = False,
-                    process  = False
-                )
+        for client in clients:
+            client_name = client or 'auto'
+            print(f"   Trying info: {client_name}...")
+            result = self._try_get_info(video_url, client, cookie_file)
+            if result is not None:
+                return result
 
-                if not info:
-                    return 0
-
-                is_live     = info.get('is_live', False)
-                live_status = info.get('live_status', '')
-
-                if is_live or live_status == 'is_live':
-                    print(f"   Live stream - skipping")
-                    return -1
-
-                if live_status == 'is_upcoming':
-                    print(f"   Upcoming - skipping")
-                    return -2
-
-                duration = info.get('duration', 0)
-
-                if not duration or duration == 0:
-                    print(f"   No duration found")
-                    return 0
-
-                print(
-                    f"   Duration: "
-                    f"{self.format_duration(duration)}"
-                )
-                return duration
-
-        except Exception as e:
-            err = str(e)
-            if 'live' in err.lower():
-                return -1
-            print(f"Fallback error: {e}")
-            return 0
+        print("   All info methods failed - check cookies")
+        return 0
 
     # ─────────────────────────────────────────────
     # Process Single Video

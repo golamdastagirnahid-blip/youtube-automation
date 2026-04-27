@@ -88,11 +88,25 @@ jobs:
         env:
           COOKIES_DATA: ${{ secrets.COOKIES_TXT }}
         run: |
-          [System.IO.File]::WriteAllText(
-            (Join-Path $PWD "cookies.txt"),
-            $env:COOKIES_DATA
-          )
-          Write-Host "Cookies ready"
+          if (-not $env:COOKIES_DATA) {
+            Write-Host "WARNING: COOKIES_TXT secret is empty!"
+          } else {
+            [System.IO.File]::WriteAllText(
+              (Join-Path $PWD "cookies.txt"),
+              $env:COOKIES_DATA
+            )
+            $size = (Get-Item "cookies.txt").Length
+            $firstLine = (Get-Content "cookies.txt" -First 1)
+            $lineCount = (Get-Content "cookies.txt").Count
+            Write-Host "Cookies: $size bytes, $lineCount lines"
+            Write-Host "First line: $firstLine"
+            if ($firstLine -like "*Netscape*") {
+              Write-Host "Format: valid Netscape"
+            } else {
+              Write-Host "WARNING: Not Netscape format - cookies may not work"
+              Write-Host "Expected first line: # Netscape HTTP Cookie File"
+            }
+          }
 
       - name: Create Credentials
         shell: powershell
