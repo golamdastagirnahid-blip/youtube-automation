@@ -198,12 +198,16 @@ class YouTubeAutomation:
             'format'        : None,
             'noplaylist'    : True,
             'socket_timeout': 30,
+            # Enable PO Token provider
+            'extractor_args': {
+                'youtube': {
+                    'player_client': [client] if client else ['web'],
+                },
+                'youtubepot-bgutilhttp': {
+                    'base_url': ['http://127.0.0.1:4416'],
+                },
+            },
         }
-
-        if client:
-            ydl_opts['extractor_args'] = {
-                'youtube': {'player_client': [client]}
-            }
 
         if cookie_file:
             ydl_opts['cookiefile'] = cookie_file
@@ -251,7 +255,7 @@ class YouTubeAutomation:
             if 'live' in err.lower():
                 return -1
             if 'bot' in err.lower() or 'Sign in' in err:
-                print(f"   {client_name}: bot detection (cookies may be expired)")
+                print(f"   {client_name}: bot detection (PO token may not be working)")
             else:
                 print(f"   {client_name}: {err[:200]}")
             return None

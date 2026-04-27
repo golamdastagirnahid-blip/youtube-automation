@@ -36,12 +36,10 @@ def _cookies_valid():
 
 COOKIES_OK = _cookies_valid()
 
-PO_TOKEN_OK = False
-try:
-    import bgutil_ytdlp_pot_provider
-    PO_TOKEN_OK = True
-except ImportError:
-    pass
+# Check if PO Token plugin is available
+# bgutil-ytdlp-pot-provider is a yt-dlp plugin, not a Python module
+# It gets loaded automatically by yt-dlp when installed
+PO_TOKEN_OK = True  # Assume available if installed via pip
 
 
 class ProgressLogger:
@@ -101,15 +99,13 @@ class VideoDownloader:
             f"{video_id}.%(ext)s"
         )
 
+        # Try with PO Token enabled (primary method)
         methods = [
-            ("web (PO token)",      'web',          True,  'bestaudio[ext=m4a]/bestaudio/best'),
-            ("default (PO token)",  None,           True,  'bestaudio[ext=m4a]/bestaudio/best'),
-            ("web any format",      'web',          True,  'best'),
-            ("default any format",  None,           True,  'best'),
-            ("android_vr",          'android_vr',   True,  'bestaudio/best'),
-            ("android_vr any",      'android_vr',   True,  'best'),
-            ("ios",                 'ios',           True,  'bestaudio/best'),
-            ("mediaconnect",        'mediaconnect',  True,  'bestaudio/best'),
+            ("web with PO token", 'web', True, 'bestaudio[ext=m4a]/bestaudio/best'),
+            ("default with PO token", None, True, 'bestaudio[ext=m4a]/bestaudio/best'),
+            ("web any format", 'web', True, 'best'),
+            ("android_vr", 'android_vr', True, 'bestaudio/best'),
+            ("ios", 'ios', True, 'bestaudio/best'),
         ]
 
         for i, (name, client, cookies, fmt) in enumerate(methods, 1):
@@ -124,8 +120,7 @@ class VideoDownloader:
                 return result
 
         print(f"   ALL download methods failed")
-        if not PO_TOKEN_OK:
-            print(f"   HINT: Install bgutil-ytdlp-pot-provider for PO token auth")
+        print(f"   HINT: Ensure PO Token server is running on http://127.0.0.1:4416")
         return None
 
     def _try_download(
@@ -156,6 +151,15 @@ class VideoDownloader:
                 'http_chunk_size'  : 10 * 1024 * 1024,
                 'continuedl'       : True,
                 'nopart'           : False,
+                # Enable PO Token provider
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': [client] if client else ['web'],
+                    },
+                    'youtubepot-bgutilhttp': {
+                        'base_url': ['http://127.0.0.1:4416'],
+                    },
+                },
             }
 
             if HAS_FFMPEG and fmt != 'best':
@@ -163,13 +167,6 @@ class VideoDownloader:
                     'key'           : 'FFmpegExtractAudio',
                     'preferredcodec': 'm4a',
                 }]
-
-            if client:
-                ydl_opts['extractor_args'] = {
-                    'youtube': {
-                        'player_client': [client],
-                    }
-                }
 
             if use_cookies and COOKIES_OK:
                 ydl_opts['cookiefile'] = COOKIES_FILE

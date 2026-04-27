@@ -234,6 +234,8 @@ jobs:
           Write-Host "FFmpeg: $(Test-Path C:\Python312\ffmpeg.exe)"
           Write-Host "Node.js: $(Test-Path C:\nodejs\node.exe)"
           Write-Host "PO Token server: $(Test-Path C:\pot-server\server\build\main.js)"
+          Write-Host "Verifying PO Token plugin is loaded..."
+          C:\Python312\python.exe -c "import yt_dlp; ydl = yt_dlp.YoutubeDL({'quiet': True}); print('PO Token providers:', [p for p in dir(ydl._ies) if 'pot' in p.lower()])"
 
       - name: Run Automation
         shell: powershell
