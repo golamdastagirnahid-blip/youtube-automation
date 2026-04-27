@@ -73,54 +73,59 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = "Continue"
-          $nodeExe = Get-Command node -ErrorAction SilentlyContinue
-          if ($nodeExe) {
-            Write-Host "Node.js already installed: $(node --version)"
+          if (Test-Path "C:\nodejs\node.exe") {
+            Write-Host "Node.js already installed"
+            C:\nodejs\node.exe --version
           } else {
             Write-Host "Installing Node.js..."
             $nodeUrl = "https://nodejs.org/dist/v22.15.0/node-v22.15.0-win-x64.zip"
             $zipFile = Join-Path $env:TEMP "nodejs.zip"
-            $extractDir = "C:\nodejs"
             Invoke-WebRequest -Uri $nodeUrl -OutFile $zipFile -UseBasicParsing
-            if (Test-Path $extractDir) { Remove-Item -Recurse -Force $extractDir }
             Expand-Archive -Path $zipFile -DestinationPath $env:TEMP -Force
             $nodeDir = Get-ChildItem -Path $env:TEMP -Directory -Filter "node-v*" | Select-Object -First 1
             if ($nodeDir) {
-              Move-Item $nodeDir.FullName $extractDir -Force
-              $currentPath = [Environment]::GetEnvironmentVariable("Path", "Machine")
-              if ($currentPath -notlike "*C:\nodejs*") {
-                [Environment]::SetEnvironmentVariable("Path", "$currentPath;C:\nodejs", "Machine")
-              }
-              $env:Path = "$env:Path;C:\nodejs"
-              Write-Host "Node.js installed: $(C:\nodejs\node.exe --version)"
+              if (Test-Path "C:\nodejs") { Remove-Item -Recurse -Force "C:\nodejs" }
+              Move-Item $nodeDir.FullName "C:\nodejs" -Force
+              Write-Host "Node.js installed"
+              C:\nodejs\node.exe --version
             } else {
               Write-Host "ERROR: Node.js extraction failed"; exit 1
             }
             Remove-Item $zipFile -Force -ErrorAction SilentlyContinue
           }
+          echo "C:\nodejs" >> $env:GITHUB_PATH
 
       - name: Install PO Token Server
         shell: powershell
         run: |
-          $ErrorActionPreference = "Continue"
-          $env:Path = "$env:Path;C:\nodejs"
           $potDir = "C:\pot-server"
-          if (Test-Path (Join-Path $potDir "server\build\main.js")) {
+          $buildFile = Join-Path $potDir "server\build\main.js"
+          if (Test-Path $buildFile) {
             Write-Host "PO Token server already built"
           } else {
             Write-Host "Setting up PO Token server..."
             if (Test-Path $potDir) { Remove-Item -Recurse -Force $potDir }
             git clone --depth 1 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git $potDir
+            if (-not (Test-Path (Join-Path $potDir "server\package.json"))) {
+              Write-Host "ERROR: git clone failed"; exit 1
+            }
+            Write-Host "Running npm ci..."
             Set-Location (Join-Path $potDir "server")
-            C:\nodejs\npm.cmd ci --silent
+            C:\nodejs\npm.cmd ci
+            if ($LASTEXITCODE -ne 0) { Write-Host "ERROR: npm ci failed"; exit 1 }
+            Write-Host "Running tsc..."
             C:\nodejs\npx.cmd tsc
-            Write-Host "PO Token server built"
+            if ($LASTEXITCODE -ne 0) { Write-Host "ERROR: tsc failed"; exit 1 }
+            if (Test-Path $buildFile) {
+              Write-Host "PO Token server built successfully"
+            } else {
+              Write-Host "ERROR: build output not found"; exit 1
+            }
           }
 
       - name: Start PO Token Server
         shell: powershell
         run: |
-          $env:Path = "$env:Path;C:\nodejs"
           $serverScript = "C:\pot-server\server\build\main.js"
           if (-not (Test-Path $serverScript)) {
             Write-Host "ERROR: PO Token server not found"; exit 1
@@ -226,7 +231,6 @@ jobs:
         shell: powershell
         run: |
           $env:PYTHONIOENCODING = "utf-8"
-          $env:Path = "$env:Path;C:\nodejs"
           C:\Python312\python.exe main.py run
         env:
           VIDEO_ID:           ${{ env.VIDEO_ID }}
