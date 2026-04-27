@@ -119,11 +119,13 @@ jobs:
       - name: Test YouTube Access
         shell: powershell
         run: |
+          $env:PYTHONIOENCODING = "utf-8"
           C:\Python312\python.exe -c "import yt_dlp; print('yt-dlp OK')"
 
       - name: Run Automation
         shell: powershell
         run: |
+          $env:PYTHONIOENCODING = "utf-8"
           C:\Python312\python.exe main.py run
         env:
           VIDEO_ID:           ${{ env.VIDEO_ID }}
