@@ -24,6 +24,20 @@ COOKIES_FILE = "cookies.txt"
 HAS_FFMPEG = shutil.which("ffmpeg") is not None
 
 
+def _cookies_valid():
+    if not os.path.exists(COOKIES_FILE):
+        return False
+    try:
+        with open(COOKIES_FILE, 'r') as f:
+            first_lines = f.read(500)
+        return '# Netscape HTTP Cookie File' in first_lines or '\t' in first_lines
+    except Exception:
+        return False
+
+
+COOKIES_OK = _cookies_valid()
+
+
 class ProgressLogger:
     """Logs download progress for large files"""
 
@@ -153,7 +167,7 @@ class VideoDownloader:
                     }
                 }
 
-            if use_cookies and os.path.exists(COOKIES_FILE):
+            if use_cookies and COOKIES_OK:
                 ydl_opts['cookiefile'] = COOKIES_FILE
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:

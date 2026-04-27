@@ -175,10 +175,6 @@ class YouTubeAutomation:
             'socket_timeout': 30,
         }
 
-        # Add cookies if available
-        if os.path.exists("cookies.txt"):
-            ydl_opts['cookiefile'] = 'cookies.txt'
-
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(
@@ -238,9 +234,6 @@ class YouTubeAutomation:
                 }
             },
         }
-
-        if os.path.exists("cookies.txt"):
-            ydl_opts_fallback['cookiefile'] = 'cookies.txt'
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts_fallback) as ydl:
