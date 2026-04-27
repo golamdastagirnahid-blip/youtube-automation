@@ -47,7 +47,6 @@ jobs:
           C:\Python312\python.exe -m pip install `
             -r requirements.txt --quiet
           Write-Host "✅ yt-dlp: $(C:\Python312\python.exe -m yt_dlp --version)"
-          Write-Host "✅ Deno: $(deno --version)"
 
       - name: Setup Cookies
         shell: powershell
@@ -150,9 +149,6 @@ jobs:
         shell: powershell
         run: |
           Write-Host "🧪 Testing YouTube access..."
-          $env:PATH = $env:PATH + `
-            ";C:\Users\Administrator\.deno\bin"
-          # Test 1: Check yt-dlp can reach YouTube
           C:\Python312\python.exe -c @"
           import yt_dlp
           opts = {'quiet': True, 'skip_download': True, 'socket_timeout': 30}
@@ -168,8 +164,6 @@ jobs:
       - name: Run Automation
         shell: powershell
         run: |
-          $env:PATH = $env:PATH + `
-            ";C:\Users\Administrator\.deno\bin"
           C:\Python312\python.exe main.py run
         env:
           VIDEO_ID:           ${{ env.VIDEO_ID }}
