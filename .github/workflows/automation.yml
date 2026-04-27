@@ -229,8 +229,8 @@ jobs:
           $env:PYTHONIOENCODING = "utf-8"
           Write-Host "Testing yt-dlp..."
           C:\Python312\python.exe -c "import yt_dlp; print('yt-dlp', yt_dlp.version.__version__)"
-          Write-Host "Testing PO Token plugin..."
-          C:\Python312\python.exe -c "import bgutil_ytdlp_pot_provider; print('PO Token plugin loaded')"
+          Write-Host "Testing PO Token plugin (via yt-dlp)..."
+          C:\Python312\python.exe -m yt_dlp --version
           Write-Host "FFmpeg: $(Test-Path C:\Python312\ffmpeg.exe)"
           Write-Host "Node.js: $(Test-Path C:\nodejs\node.exe)"
           Write-Host "PO Token server: $(Test-Path C:\pot-server\server\build\main.js)"
