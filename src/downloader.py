@@ -91,6 +91,10 @@ class VideoDownloader:
             print(f"   ✅ FFmpeg found — will convert to m4a")
         else:
             print(f"   ⚠️ FFmpeg not found — will use raw audio")
+        if COOKIES_OK:
+            print(f"   ✅ Cookies loaded")
+        else:
+            print(f"   ⚠️ No valid cookies — YouTube may block")
 
         output_path = os.path.join(
             DOWNLOADS_DIR,
@@ -98,10 +102,10 @@ class VideoDownloader:
         )
 
         methods = [
-            ("Auto (android_vr fallback)", None, False, False),
+            ("Auto + cookies", None, True, False),
             ("Android + cookies", 'android', True, False),
-            ("Android VR", 'android_vr', False, False),
-            ("Media Connect", 'mediaconnect', False, False),
+            ("Android VR + cookies", 'android_vr', True, False),
+            ("Media Connect + cookies", 'mediaconnect', True, False),
             ("Any format + cookies", 'android', True, True),
         ]
 

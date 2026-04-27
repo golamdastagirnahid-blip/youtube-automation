@@ -175,6 +175,15 @@ class YouTubeAutomation:
             'socket_timeout': 30,
         }
 
+        if os.path.exists("cookies.txt"):
+            try:
+                with open("cookies.txt", "r") as f:
+                    head = f.read(500)
+                if "Netscape" in head or "\t" in head:
+                    ydl_opts['cookiefile'] = 'cookies.txt'
+            except Exception:
+                pass
+
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(
@@ -234,6 +243,15 @@ class YouTubeAutomation:
                 }
             },
         }
+
+        if os.path.exists("cookies.txt"):
+            try:
+                with open("cookies.txt", "r") as f:
+                    head = f.read(500)
+                if "Netscape" in head or "\t" in head:
+                    ydl_opts_fallback['cookiefile'] = 'cookies.txt'
+            except Exception:
+                pass
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts_fallback) as ydl:
