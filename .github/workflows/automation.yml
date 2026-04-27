@@ -123,25 +123,19 @@ jobs:
       - name: Validate Token
         shell: powershell
         run: |
-          Write-Host "🔐 Validating token.json..."
+          Write-Host "Validating token.json..."
           $content = Get-Content token.json -Raw
-          try {
-            $json = $content | ConvertFrom-Json
-            if ($json.refresh_token) {
-              Write-Host "✅ Token has refresh_token"
-            } else {
-              Write-Host "❌ Token MISSING refresh_token!"
-              exit 1
-            }
-            if ($json.client_id) {
-              Write-Host "✅ Token has client_id"
-            } else {
-              Write-Host "❌ Token MISSING client_id!"
-              exit 1
-            }
-          } catch {
-            Write-Host "❌ token.json is INVALID JSON!"
-            Write-Host "   First 100 chars: $($content.Substring(0, [Math]::Min(100, $content.Length)))"
+          $json = $content | ConvertFrom-Json
+          if ($json.refresh_token) {
+            Write-Host "Token has refresh_token"
+          } else {
+            Write-Host "Token MISSING refresh_token"
+            exit 1
+          }
+          if ($json.client_id) {
+            Write-Host "Token has client_id"
+          } else {
+            Write-Host "Token MISSING client_id"
             exit 1
           }
 
