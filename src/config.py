@@ -40,7 +40,7 @@ DATABASE_FILE       = os.path.join(BASE_DIR, "database.json")
 AUTH_TOKEN_FILE     = os.path.join(BASE_DIR, "token.json")
 CLIENT_SECRETS_FILE = os.path.join(BASE_DIR, "client_secrets.json")
 
-# ✅ Background image for thumbnails
+# Background image for thumbnails
 BACKGROUND_IMAGE    = os.path.join(BASE_DIR, "assets", "background.jpg")
 
 for d in [DOWNLOADS_DIR, THUMBNAILS_DIR, PROCESSED_DIR]:

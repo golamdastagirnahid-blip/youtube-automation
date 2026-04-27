@@ -87,7 +87,7 @@ class ThumbnailGenerator:
         duration = None
     ):
         pnum = part_num if part_num else 1
-        print(f"   🎨 Generating thumbnail...")
+        print(f"   Generating thumbnail...")
 
         unique_id   = int(time.time())
         output_path = os.path.join(
@@ -109,7 +109,7 @@ class ThumbnailGenerator:
         img = ImageEnhance.Brightness(img).enhance(1.05)
         img.save(output_path, "JPEG", quality=95)
 
-        print(f"   ✅ Thumbnail: {output_path}")
+        print(f"   Thumbnail: {output_path}")
         return output_path
 
     def _add_gradient(self, img, draw, theme):
@@ -205,6 +205,10 @@ class ThumbnailGenerator:
         font_small  = None
 
         for fp in [
+            "C:\\Windows\\Fonts\\arialbd.ttf",
+            "C:\\Windows\\Fonts\\arial.ttf",
+            "C:\\Windows\\Fonts\\verdanab.ttf",
+            "C:\\Windows\\Fonts\\calibrib.ttf",
             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
             "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
         ]:

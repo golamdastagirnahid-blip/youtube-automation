@@ -30,9 +30,8 @@ class YouTubeAuth:
         self.youtube     = None
 
     def authenticate(self):
-        print("🔐 Authenticating...")
+        print("Authenticating...")
 
-        # Step 1: Load existing token
         if os.path.exists(AUTH_TOKEN_FILE):
             try:
                 with open(AUTH_TOKEN_FILE, "r", encoding="utf-8-sig") as f:
@@ -43,39 +42,37 @@ class YouTubeAuth:
                 self.credentials = Credentials.from_authorized_user_info(
                     token_data, SCOPES
                 )
-                print("   ✅ Token loaded from file")
+                print("   Token loaded from file")
             except json.JSONDecodeError as e:
-                print(f"   ❌ token.json is invalid JSON: {e}")
-                print(f"   ❌ Check your YOUTUBE_TOKEN secret for BOM/encoding issues")
+                print(f"   token.json is invalid JSON: {e}")
+                print(f"   Check your YOUTUBE_TOKEN secret for BOM/encoding issues")
                 self.credentials = None
             except Exception as e:
-                print(f"   ❌ Failed to load token: {e}")
+                print(f"   Failed to load token: {e}")
                 self.credentials = None
         else:
-            print(f"   ⚠️ No token.json found at {AUTH_TOKEN_FILE}")
+            print(f"   No token.json found at {AUTH_TOKEN_FILE}")
 
-        # Step 2: Refresh if expired
         if self.credentials and self.credentials.expired \
                 and self.credentials.refresh_token:
-            print("   🔄 Token expired, refreshing...")
+            print("   Token expired, refreshing...")
             try:
                 self.credentials.refresh(Request())
                 self._save_token()
-                print("   ✅ Token refreshed successfully")
+                print("   Token refreshed successfully")
             except Exception as e:
-                print(f"   ❌ Token refresh FAILED: {e}")
-                print(f"   ❌ Your refresh token may have expired.")
-                print(f"   ❌ If your Google Cloud app is in 'Testing' mode,")
+                print(f"   Token refresh FAILED: {e}")
+                print(f"   Your refresh token may have expired.")
+                print(f"   If your Google Cloud app is in 'Testing' mode,")
                 print(f"      refresh tokens expire after 7 days.")
-                print(f"   ❌ Fix: Go to Google Cloud Console → OAuth consent screen")
-                print(f"      → Publish the app, then re-generate token.json")
+                print(f"   Fix: Go to Google Cloud Console -> OAuth consent screen")
+                print(f"      -> Publish the app, then re-generate token.json")
                 self.credentials = None
 
-        # Step 3: If still no valid credentials
         if not self.credentials or not self.credentials.valid:
             if is_headless():
                 print("=" * 60)
-                print("❌ AUTHENTICATION FAILED ON HEADLESS RUNNER")
+                print("AUTHENTICATION FAILED ON HEADLESS RUNNER")
                 print("")
                 print("   Cannot open browser for OAuth on CI/headless.")
                 print("   Your token.json is missing or expired.")
@@ -88,44 +85,42 @@ class YouTubeAuth:
                 print("=" * 60)
                 return None
             else:
-                print("   🌐 Opening browser for OAuth...")
+                print("   Opening browser for OAuth...")
                 try:
                     if not os.path.exists(CLIENT_SECRETS_FILE):
-                        print(f"   ❌ Missing {CLIENT_SECRETS_FILE}")
+                        print(f"   Missing {CLIENT_SECRETS_FILE}")
                         return None
                     flow = InstalledAppFlow.from_client_secrets_file(
                         CLIENT_SECRETS_FILE, SCOPES
                     )
                     self.credentials = flow.run_local_server(port=8080)
                     self._save_token()
-                    print("   ✅ New token obtained via browser")
+                    print("   New token obtained via browser")
                 except Exception as e:
-                    print(f"   ❌ Browser OAuth failed: {e}")
+                    print(f"   Browser OAuth failed: {e}")
                     return None
 
-        # Step 4: Build YouTube API client
         try:
             self.youtube = build(
                 "youtube", "v3",
                 credentials=self.credentials
             )
-            print("✅ YouTube API ready")
+            print("YouTube API ready")
 
-            # Verify we can actually make API calls
             response = self.youtube.channels().list(
                 part="snippet", mine=True
             ).execute()
             items = response.get("items", [])
             if items:
                 ch = items[0]
-                print(f"   📺 Logged in as: {ch['snippet']['title']} ({ch['id']})")
+                print(f"   Logged in as: {ch['snippet']['title']} ({ch['id']})")
             else:
-                print("   ⚠️ No channel found for this account")
+                print("   No channel found for this account")
 
             return self.youtube
 
         except Exception as e:
-            print(f"❌ Failed to build YouTube API: {e}")
+            print(f"Failed to build YouTube API: {e}")
             return None
 
     def _save_token(self):
@@ -140,9 +135,9 @@ class YouTubeAuth:
             }
             with open(AUTH_TOKEN_FILE, "w", encoding="utf-8") as f:
                 json.dump(token_data, f, indent=4)
-            print(f"   💾 Token saved to {AUTH_TOKEN_FILE}")
+            print(f"   Token saved to {AUTH_TOKEN_FILE}")
         except Exception as e:
-            print(f"   ⚠️ Could not save token: {e}")
+            print(f"   Could not save token: {e}")
 
     def get_target_channel_id(self):
         return TARGET_CHANNEL_ID
