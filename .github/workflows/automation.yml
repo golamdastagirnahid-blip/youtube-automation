@@ -161,9 +161,10 @@ jobs:
             New-Item -ItemType Directory -Path $pluginDir -Force | Out-Null
             Write-Host "Created plugin directory: $pluginDir"
           }
-          # Copy plugin files from site-packages to yt-dlp plugins directory
-          $sitePackages = C:\Python312\python.exe -c "import site; print(site.getsitepackages()[0])"
+          # Find plugin files in site-packages
+          $sitePackages = "C:\Python312\Lib\site-packages"
           $sourcePlugin = Join-Path $sitePackages "yt_dlp_plugins"
+          Write-Host "Looking for plugin at: $sourcePlugin"
           if (Test-Path $sourcePlugin) {
             Copy-Item -Path $sourcePlugin -Destination $pluginDir -Recurse -Force
             Write-Host "Copied plugin files to: $pluginDir"
@@ -171,6 +172,8 @@ jobs:
             Get-ChildItem -Path (Join-Path $pluginDir "yt_dlp_plugins") -Recurse | Select-Object FullName
           } else {
             Write-Host "ERROR: Plugin source not found at: $sourcePlugin"
+            Write-Host "Searching for yt_dlp_plugins in site-packages..."
+            Get-ChildItem -Path $sitePackages -Filter "yt_dlp_plugins" -Recurse -Directory | Select-Object FullName
             exit 1
           }
 
