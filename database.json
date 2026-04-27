@@ -1,14 +1,16 @@
 {
     "uploaded_videos": [
         "x6kklFiuf2k",
-        "FrS7TAcMd5s"
+        "FrS7TAcMd5s",
+        "BNDVfwB9X1k"
     ],
     "daily_counts": {
         "2026-04-23": 1,
-        "2026-04-24": 1
+        "2026-04-24": 1,
+        "2026-04-27": 1
     },
     "statistics": {
-        "total_uploads": 2
+        "total_uploads": 3
     },
     "queued": []
 }
