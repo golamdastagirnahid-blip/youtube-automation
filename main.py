@@ -6,6 +6,7 @@ Uses OAuth2 for clean authentication - No VPN needed
 
 import os
 import sys
+import re
 import json
 import time
 import shutil
@@ -300,12 +301,23 @@ class YouTubeAutomation:
     # ─────────────────────────────────────────────
     # Process Single Video
     # ─────────────────────────────────────────────
+    def _clean_video_id(self, vid_id):
+        if not vid_id:
+            return vid_id
+        import re
+        match = re.match(r'^([a-zA-Z0-9_-]+)', vid_id)
+        return match.group(1) if match else vid_id
+
     def process_video(self, video_info):
-        vid_id    = video_info.get("video_id")
+        vid_id    = self._clean_video_id(
+            video_info.get("video_id")
+        )
         video_url = video_info.get("url")
         title     = video_info.get(
             "title", "Relaxing Video"
         )
+        if video_url and '&t=' in video_url:
+            video_url = re.sub(r'[&?]t=[^&]*', '', video_url)
 
         print(f"\n{'='*60}")
         print(f"Processing: {title}")

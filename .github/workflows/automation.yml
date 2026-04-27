@@ -39,6 +39,37 @@ jobs:
           fetch-depth: 1
           ref: main
 
+      - name: Install FFmpeg
+        shell: powershell
+        run: |
+          $ffmpegPath = Get-Command ffmpeg -ErrorAction SilentlyContinue
+          if ($ffmpegPath) {
+            Write-Host "FFmpeg already installed: $($ffmpegPath.Source)"
+            ffmpeg -version | Select-Object -First 1
+          } else {
+            Write-Host "FFmpeg not found - installing..."
+            $zipUrl = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+            $zipFile = Join-Path $env:TEMP "ffmpeg.zip"
+            $extractDir = Join-Path $env:TEMP "ffmpeg_extract"
+            Write-Host "Downloading FFmpeg..."
+            Invoke-WebRequest -Uri $zipUrl -OutFile $zipFile -UseBasicParsing
+            Write-Host "Extracting..."
+            if (Test-Path $extractDir) { Remove-Item -Recurse -Force $extractDir }
+            Expand-Archive -Path $zipFile -DestinationPath $extractDir -Force
+            $binDir = Get-ChildItem -Path $extractDir -Recurse -Directory -Filter "bin" | Select-Object -First 1
+            if ($binDir) {
+              Copy-Item (Join-Path $binDir.FullName "ffmpeg.exe") -Destination "C:\Python312\" -Force
+              Copy-Item (Join-Path $binDir.FullName "ffprobe.exe") -Destination "C:\Python312\" -Force
+              Write-Host "FFmpeg installed to C:\Python312\"
+              C:\Python312\ffmpeg.exe -version | Select-Object -First 1
+            } else {
+              Write-Host "ERROR: Could not find ffmpeg bin directory"
+              exit 1
+            }
+            Remove-Item $zipFile -Force -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $extractDir -ErrorAction SilentlyContinue
+          }
+
       - name: Install Dependencies
         shell: powershell
         run: |
@@ -102,11 +133,18 @@ jobs:
           }
           if (-not $VIDEO_PRIVACY) { $VIDEO_PRIVACY = "public" }
           if (-not $VIDEO_TITLE)   { $VIDEO_TITLE   = "Relaxing Video" }
+          # Clean video ID: strip URL params like &t=26s
+          if ($VIDEO_ID -match "^([a-zA-Z0-9_-]+)") {
+            $VIDEO_ID = $Matches[1]
+          }
+          # Clean video URL: remove timestamp params
+          $VIDEO_URL = $VIDEO_URL -replace '[&?]t=[^&]*', ''
           echo "VIDEO_ID=$VIDEO_ID"           >> $env:GITHUB_ENV
           echo "VIDEO_URL=$VIDEO_URL"         >> $env:GITHUB_ENV
           echo "VIDEO_TITLE=$VIDEO_TITLE"     >> $env:GITHUB_ENV
           echo "VIDEO_PRIVACY=$VIDEO_PRIVACY" >> $env:GITHUB_ENV
-          Write-Host "Variables set: $VIDEO_ID"
+          Write-Host "Video ID (cleaned): $VIDEO_ID"
+          Write-Host "Video URL (cleaned): $VIDEO_URL"
 
       - name: Show Video Info
         shell: powershell
@@ -121,6 +159,7 @@ jobs:
         run: |
           $env:PYTHONIOENCODING = "utf-8"
           C:\Python312\python.exe -c "import yt_dlp; print('yt-dlp OK')"
+          C:\Python312\ffmpeg.exe -version 2>&1 | Select-Object -First 1
 
       - name: Run Automation
         shell: powershell
