@@ -1,7 +1,6 @@
 """
 Video Downloader - Audio Only
 Handles 12-24 hour videos (multi-GB files)
-Uses android_vr fallback (no PO token needed)
 Falls back to raw download if FFmpeg is unavailable
 """
 
@@ -85,22 +84,34 @@ class ProgressLogger:
 class VideoDownloader:
 
     def _list_formats(self, video_url):
-        """Show what formats yt-dlp can see — helps debug failures."""
-        opts = {
-            'quiet': True,
-            'no_warnings': True,
-            'skip_download': True,
-            'noplaylist': True,
-            'socket_timeout': 30,
-        }
-        if COOKIES_OK:
-            opts['cookiefile'] = COOKIES_FILE
+        """Show what formats yt-dlp can see for each client."""
+        clients = [
+            (None, True),
+            ('android_vr', True),
+            ('android', True),
+            ('ios', True),
+            ('mediaconnect', True),
+            (None, False),
+        ]
 
-        for client in [None, 'android_vr']:
+        for client, use_cookies in clients:
+            opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'skip_download': True,
+                'noplaylist': True,
+                'socket_timeout': 30,
+            }
             if client:
                 opts['extractor_args'] = {
                     'youtube': {'player_client': [client]}
                 }
+            if use_cookies and COOKIES_OK:
+                opts['cookiefile'] = COOKIES_FILE
+
+            client_name = client or 'auto'
+            cookie_str = '+cookies' if (use_cookies and COOKIES_OK) else ''
+
             try:
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     info = ydl.extract_info(
@@ -108,66 +119,126 @@ class VideoDownloader:
                     )
                     fmts = info.get('formats', [])
                     if fmts:
-                        client_name = client or 'auto'
-                        print(f"   Formats ({client_name}): {len(fmts)} found")
                         audio_fmts = [
                             f for f in fmts
                             if f.get('acodec', 'none') != 'none'
                         ]
-                        print(f"   Audio streams: {len(audio_fmts)}")
-                        for f in audio_fmts[:5]:
+                        print(f"   [{client_name}{cookie_str}] {len(fmts)} formats, {len(audio_fmts)} audio")
+                        for f in audio_fmts[:3]:
                             ext = f.get('ext', '?')
                             abr = f.get('abr', '?')
                             fid = f.get('format_id', '?')
-                            print(f"     - {fid}: {ext} {abr}kbps")
-                        return True
+                            acodec = f.get('acodec', '?')
+                            print(f"     {fid}: {ext} {acodec} {abr}kbps")
+                        return client, use_cookies, fmts
+                    else:
+                        print(f"   [{client_name}{cookie_str}] 0 formats returned")
             except Exception as e:
-                err = str(e)[:200]
-                client_name = client or 'auto'
-                print(f"   Format check ({client_name}): {err}")
-        return False
+                err = str(e)[:150]
+                print(f"   [{client_name}{cookie_str}] {err}")
+
+        return None, False, []
 
     def download_audio(self, video_url, video_id):
         print(f"   Downloading: {video_id}")
         if HAS_FFMPEG:
-            print(f"   FFmpeg found - will convert to m4a")
+            print(f"   FFmpeg: yes")
         else:
-            print(f"   FFmpeg not found - will use raw audio")
+            print(f"   FFmpeg: no (raw audio)")
         if COOKIES_OK:
-            print(f"   Cookies loaded")
+            print(f"   Cookies: loaded")
         else:
-            print(f"   No valid cookies - YouTube may block")
+            print(f"   Cookies: none")
 
-        self._list_formats(video_url)
+        print(f"   Scanning available formats...")
+        best_client, best_cookies, fmts = self._list_formats(video_url)
 
         output_path = os.path.join(
             DOWNLOADS_DIR,
             f"{video_id}.%(ext)s"
         )
 
+        if fmts:
+            print(f"   Best client: {best_client or 'auto'} (cookies={'yes' if best_cookies else 'no'})")
+            result = self._try_download_with_formats(
+                video_url, video_id, output_path,
+                best_client, best_cookies, fmts
+            )
+            if result:
+                return result
+
         methods = [
-            ("Auto audio", None, True, 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio'),
-            ("Android audio", 'android', True, 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio'),
-            ("Android VR audio", 'android_vr', True, 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio'),
-            ("MediaConnect audio", 'mediaconnect', True, 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio'),
-            ("Auto best", None, True, 'bestaudio/best'),
-            ("Android VR best", 'android_vr', True, 'bestaudio/best'),
-            ("Auto any", None, True, 'best'),
-            ("Android VR any", 'android_vr', True, 'best'),
+            ("auto+cookies",          None,             True),
+            ("android_vr+cookies",    'android_vr',     True),
+            ("android+cookies",       'android',        True),
+            ("ios+cookies",           'ios',            True),
+            ("mediaconnect+cookies",  'mediaconnect',   True),
+            ("auto (no cookies)",     None,             False),
+            ("android_vr (no cookies)", 'android_vr',   False),
         ]
 
-        for i, (name, client, cookies, fmt) in enumerate(methods, 1):
+        for i, (name, client, cookies) in enumerate(methods, 1):
             print(f"   Method {i}/{len(methods)}: {name}...")
+            for fmt in ['bestaudio/best', 'best']:
+                result = self._try_download(
+                    video_url, video_id,
+                    output_path, client=client,
+                    use_cookies=cookies,
+                    fmt=fmt,
+                )
+                if result:
+                    return result
+
+        print(f"\n   === VERBOSE DIAGNOSTIC (last attempt) ===")
+        result = self._try_download_verbose(
+            video_url, video_id, output_path
+        )
+        if result:
+            return result
+
+        print(f"   ALL download methods failed")
+        return None
+
+    def _try_download_with_formats(
+        self, video_url, video_id, output_path,
+        client, use_cookies, fmts
+    ):
+        audio_fmts = [
+            f for f in fmts
+            if f.get('acodec', 'none') != 'none'
+               and f.get('vcodec', 'none') == 'none'
+        ]
+        if not audio_fmts:
+            audio_fmts = [
+                f for f in fmts
+                if f.get('acodec', 'none') != 'none'
+            ]
+
+        if audio_fmts:
+            best = sorted(
+                audio_fmts,
+                key=lambda f: f.get('abr', 0) or 0,
+                reverse=True
+            )[0]
+            fmt_id = best.get('format_id')
+            print(f"   Trying format ID: {fmt_id}")
             result = self._try_download(
-                video_url, video_id,
-                output_path, client=client,
-                use_cookies=cookies,
+                video_url, video_id, output_path,
+                client=client, use_cookies=use_cookies,
+                fmt=fmt_id,
+            )
+            if result:
+                return result
+
+        for fmt in ['bestaudio/best', 'best']:
+            result = self._try_download(
+                video_url, video_id, output_path,
+                client=client, use_cookies=use_cookies,
                 fmt=fmt,
             )
             if result:
                 return result
 
-        print(f"   ALL {len(methods)} download methods failed")
         return None
 
     def _try_download(
@@ -200,11 +271,15 @@ class VideoDownloader:
                 'nopart'           : False,
             }
 
-            if HAS_FFMPEG and fmt != 'best':
-                ydl_opts['postprocessors'] = [{
-                    'key'           : 'FFmpegExtractAudio',
-                    'preferredcodec': 'm4a',
-                }]
+            if HAS_FFMPEG and fmt not in ('best',):
+                is_format_id = not any(
+                    c in fmt for c in ['/', '[', ']']
+                )
+                if not is_format_id:
+                    ydl_opts['postprocessors'] = [{
+                        'key'           : 'FFmpegExtractAudio',
+                        'preferredcodec': 'm4a',
+                    }]
 
             if client:
                 ydl_opts['extractor_args'] = {
@@ -238,10 +313,39 @@ class VideoDownloader:
             elif 'Sign in' in err or 'login' in err.lower() or 'bot' in err.lower():
                 print(f"     {client_name}: Login/cookies required")
             elif 'ffmpeg' in err.lower() or 'postprocess' in err.lower():
-                print(f"     {client_name}: FFmpeg/postprocessor error: {err[:200]}")
+                print(f"     {client_name}: FFmpeg error: {err[:200]}")
             else:
                 print(f"     {client_name}: {err[:300]}")
 
+        return None
+
+    def _try_download_verbose(self, video_url, video_id, output_path):
+        """Last resort: verbose yt-dlp output to see exactly what's happening."""
+        try:
+            ydl_opts = {
+                'format'           : 'bestaudio/best',
+                'outtmpl'          : output_path,
+                'quiet'            : False,
+                'verbose'          : True,
+                'no_warnings'      : False,
+                'socket_timeout'   : 120,
+                'retries'          : 5,
+                'continuedl'       : True,
+            }
+
+            if COOKIES_OK:
+                ydl_opts['cookiefile'] = COOKIES_FILE
+
+            ydl_opts['extractor_args'] = {
+                'youtube': {'player_client': ['android_vr']}
+            }
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.extract_info(video_url, download=True)
+
+            return self._find_downloaded(video_id)
+        except Exception as e:
+            print(f"   VERBOSE error: {str(e)[:500]}")
         return None
 
     def _find_downloaded(self, video_id):
