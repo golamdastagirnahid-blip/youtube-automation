@@ -42,45 +42,48 @@ jobs:
       - name: Install Dependencies
         shell: powershell
         run: |
-          C:\Python312\python.exe -m pip install `
-            -U yt-dlp --quiet
-          C:\Python312\python.exe -m pip install `
-            -r requirements.txt --quiet
-          Write-Host "✅ yt-dlp: $(C:\Python312\python.exe -m yt_dlp --version)"
+          C:\Python312\python.exe -m pip install -U yt-dlp --quiet
+          C:\Python312\python.exe -m pip install -r requirements.txt --quiet
+          C:\Python312\python.exe -m yt_dlp --version
 
       - name: Setup Cookies
         shell: powershell
+        env:
+          COOKIES_DATA: ${{ secrets.COOKIES_TXT }}
         run: |
           [System.IO.File]::WriteAllText(
             (Join-Path $PWD "cookies.txt"),
-            '${{ secrets.COOKIES_TXT }}'
+            $env:COOKIES_DATA
           )
-          $lines = (Get-Content cookies.txt).Count
-          Write-Host "✅ Cookies ready (no BOM): $lines lines"
+          Write-Host "Cookies ready"
 
       - name: Create Credentials
         shell: powershell
+        env:
+          CLIENT_DATA: ${{ secrets.CLIENT_SECRETS }}
+          TOKEN_DATA: ${{ secrets.YOUTUBE_TOKEN }}
         run: |
           [System.IO.File]::WriteAllText(
             (Join-Path $PWD "client_secrets.json"),
-            '${{ secrets.CLIENT_SECRETS }}'
+            $env:CLIENT_DATA
           )
           [System.IO.File]::WriteAllText(
             (Join-Path $PWD "token.json"),
-            '${{ secrets.YOUTUBE_TOKEN }}'
+            $env:TOKEN_DATA
           )
-          Write-Host "✅ Credentials created (no BOM)"
+          Write-Host "Credentials created"
 
       - name: Create Database If Missing
         shell: powershell
         run: |
           if (-not (Test-Path "database.json")) {
-            $db = '{"uploaded_videos":[],"daily_counts":{},"statistics":{"total_uploads":0},"queued":[]}'
-            $db | Out-File -FilePath database.json `
-              -Encoding utf8
-            Write-Host "✅ database.json created"
+            [System.IO.File]::WriteAllText(
+              (Join-Path $PWD "database.json"),
+              '{"uploaded_videos":[],"daily_counts":{},"statistics":{"total_uploads":0},"queued":[]}'
+            )
+            Write-Host "database.json created"
           } else {
-            Write-Host "✅ database.json exists"
+            Write-Host "database.json exists"
           }
 
       - name: Set Variables
@@ -103,38 +106,20 @@ jobs:
           echo "VIDEO_URL=$VIDEO_URL"         >> $env:GITHUB_ENV
           echo "VIDEO_TITLE=$VIDEO_TITLE"     >> $env:GITHUB_ENV
           echo "VIDEO_PRIVACY=$VIDEO_PRIVACY" >> $env:GITHUB_ENV
-          Write-Host "✅ Variables set"
-          Write-Host "   ID     : $VIDEO_ID"
-          Write-Host "   URL    : $VIDEO_URL"
-          Write-Host "   Title  : $VIDEO_TITLE"
-          Write-Host "   Privacy: $VIDEO_PRIVACY"
+          Write-Host "Variables set: $VIDEO_ID"
 
       - name: Show Video Info
         shell: powershell
         run: |
-          Write-Host "========================================"
-          Write-Host "🎬 Video Information"
-          Write-Host "   ID     : ${{ env.VIDEO_ID }}"
-          Write-Host "   URL    : ${{ env.VIDEO_URL }}"
-          Write-Host "   Title  : ${{ env.VIDEO_TITLE }}"
-          Write-Host "   Privacy: ${{ env.VIDEO_PRIVACY }}"
-          Write-Host "========================================"
+          Write-Host "Video ID: ${{ env.VIDEO_ID }}"
+          Write-Host "Video URL: ${{ env.VIDEO_URL }}"
+          Write-Host "Title: ${{ env.VIDEO_TITLE }}"
+          Write-Host "Privacy: ${{ env.VIDEO_PRIVACY }}"
 
       - name: Test YouTube Access
         shell: powershell
         run: |
-          Write-Host "🧪 Testing YouTube access..."
-          C:\Python312\python.exe -c @"
-          import yt_dlp
-          opts = {'quiet': True, 'skip_download': True, 'socket_timeout': 30}
-          try:
-              with yt_dlp.YoutubeDL(opts) as ydl:
-                  info = ydl.extract_info('https://www.youtube.com/watch?v=jNQXAC9IVRw', download=False, process=False)
-                  print(f'OK - Duration: {info.get("duration", "?")}s')
-          except Exception as e:
-              print(f'WARN: {e}')
-          "@
-          Write-Host "✅ YouTube access test done"
+          C:\Python312\python.exe -c "import yt_dlp; print('yt-dlp OK')"
 
       - name: Run Automation
         shell: powershell
@@ -158,40 +143,19 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             git commit -m "Update DB [skip ci]"
             git push
-            Write-Host "✅ Database saved"
+            Write-Host "Database saved"
           } else {
-            Write-Host "✅ No changes to save"
-          }
-
-      - name: Show Token Status
-        if: always()
-        shell: powershell
-        run: |
-          if (Test-Path "token.json") {
-            $t = Get-Content token.json | ConvertFrom-Json
-            if ($t.refresh_token) {
-              Write-Host "✅ token.json has refresh_token"
-              Write-Host "⚠️ IMPORTANT: If token was refreshed, update YOUTUBE_TOKEN secret!"
-              Write-Host "   Copy the contents of token.json to your GitHub secret"
-            }
-          } else {
-            Write-Host "⚠️ token.json not found (may have been cleaned up)"
+            Write-Host "No changes to save"
           }
 
       - name: Cleanup
         if: always()
         shell: powershell
         run: |
-          Remove-Item -Recurse -Force downloads `
-            -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force processed `
-            -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force thumbnails `
-            -ErrorAction SilentlyContinue
-          Remove-Item -Force token.json `
-            -ErrorAction SilentlyContinue
-          Remove-Item -Force client_secrets.json `
-            -ErrorAction SilentlyContinue
-          Remove-Item -Force cookies.txt `
-            -ErrorAction SilentlyContinue
-          Write-Host "✅ Cleanup done"
+          Remove-Item -Recurse -Force downloads -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force processed -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force thumbnails -ErrorAction SilentlyContinue
+          Remove-Item -Force token.json -ErrorAction SilentlyContinue
+          Remove-Item -Force client_secrets.json -ErrorAction SilentlyContinue
+          Remove-Item -Force cookies.txt -ErrorAction SilentlyContinue
+          Write-Host "Cleanup done"
