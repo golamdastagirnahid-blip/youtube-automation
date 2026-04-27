@@ -1,0 +1,31 @@
+# ── Secret Files (NEVER commit these) ─────────
+token.json
+client_secrets.json
+cookies.txt
+.env
+*.env
+secrets.json
+
+# ── Download Folders ───────────────────────────
+downloads/
+processed/
+thumbnails/
+
+# ── Python Cache ───────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ── IDE Files ──────────────────────────────────
+.vscode/
+.idea/
+*.swp
+
+# ── OS Files ───────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Logs ───────────────────────────────────────
+*.log
+logs/

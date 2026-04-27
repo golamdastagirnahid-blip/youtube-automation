@@ -1,0 +1,228 @@
+name: Video Upload
+
+on:
+  repository_dispatch:
+    types: [new_video_detected]
+  workflow_dispatch:
+    inputs:
+      video_id:
+        description: 'YouTube Video ID'
+        required: true
+        default: ''
+      video_url:
+        description: 'YouTube Video URL'
+        required: true
+        default: ''
+      video_title:
+        description: 'Video Title'
+        required: false
+        default: 'Relaxing Video'
+      video_privacy:
+        description: 'Privacy'
+        required: false
+        default: 'public'
+
+jobs:
+  upload:
+    runs-on: self-hosted
+    timeout-minutes: 1440
+    permissions:
+      contents: write
+
+    steps:
+
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+          clean: true
+          fetch-depth: 1
+          ref: main
+
+      - name: Install Dependencies
+        shell: powershell
+        run: |
+          C:\Python312\python.exe -m pip install `
+            -U yt-dlp --quiet
+          C:\Python312\python.exe -m pip install `
+            -r requirements.txt --quiet
+          Write-Host "✅ yt-dlp: $(C:\Python312\python.exe -m yt_dlp --version)"
+          Write-Host "✅ Deno: $(deno --version)"
+
+      - name: Setup Cookies
+        shell: powershell
+        run: |
+          [System.IO.File]::WriteAllText(
+            (Join-Path $PWD "cookies.txt"),
+            '${{ secrets.COOKIES_TXT }}'
+          )
+          $lines = (Get-Content cookies.txt).Count
+          Write-Host "✅ Cookies ready (no BOM): $lines lines"
+
+      - name: Create Credentials
+        shell: powershell
+        run: |
+          [System.IO.File]::WriteAllText(
+            (Join-Path $PWD "client_secrets.json"),
+            '${{ secrets.CLIENT_SECRETS }}'
+          )
+          [System.IO.File]::WriteAllText(
+            (Join-Path $PWD "token.json"),
+            '${{ secrets.YOUTUBE_TOKEN }}'
+          )
+          Write-Host "✅ Credentials created (no BOM)"
+
+      - name: Create Database If Missing
+        shell: powershell
+        run: |
+          if (-not (Test-Path "database.json")) {
+            $db = '{"uploaded_videos":[],"daily_counts":{},"statistics":{"total_uploads":0},"queued":[]}'
+            $db | Out-File -FilePath database.json `
+              -Encoding utf8
+            Write-Host "✅ database.json created"
+          } else {
+            Write-Host "✅ database.json exists"
+          }
+
+      - name: Set Variables
+        shell: powershell
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $VIDEO_ID      = "${{ github.event.inputs.video_id }}"
+            $VIDEO_URL     = "${{ github.event.inputs.video_url }}"
+            $VIDEO_TITLE   = "${{ github.event.inputs.video_title }}"
+            $VIDEO_PRIVACY = "${{ github.event.inputs.video_privacy }}"
+          } else {
+            $VIDEO_ID      = "${{ github.event.client_payload.video_id }}"
+            $VIDEO_URL     = "${{ github.event.client_payload.video_url }}"
+            $VIDEO_TITLE   = "${{ github.event.client_payload.video_title }}"
+            $VIDEO_PRIVACY = "${{ github.event.client_payload.video_privacy }}"
+          }
+          if (-not $VIDEO_PRIVACY) { $VIDEO_PRIVACY = "public" }
+          if (-not $VIDEO_TITLE)   { $VIDEO_TITLE   = "Relaxing Video" }
+          echo "VIDEO_ID=$VIDEO_ID"           >> $env:GITHUB_ENV
+          echo "VIDEO_URL=$VIDEO_URL"         >> $env:GITHUB_ENV
+          echo "VIDEO_TITLE=$VIDEO_TITLE"     >> $env:GITHUB_ENV
+          echo "VIDEO_PRIVACY=$VIDEO_PRIVACY" >> $env:GITHUB_ENV
+          Write-Host "✅ Variables set"
+          Write-Host "   ID     : $VIDEO_ID"
+          Write-Host "   URL    : $VIDEO_URL"
+          Write-Host "   Title  : $VIDEO_TITLE"
+          Write-Host "   Privacy: $VIDEO_PRIVACY"
+
+      - name: Show Video Info
+        shell: powershell
+        run: |
+          Write-Host "========================================"
+          Write-Host "🎬 Video Information"
+          Write-Host "   ID     : ${{ env.VIDEO_ID }}"
+          Write-Host "   URL    : ${{ env.VIDEO_URL }}"
+          Write-Host "   Title  : ${{ env.VIDEO_TITLE }}"
+          Write-Host "   Privacy: ${{ env.VIDEO_PRIVACY }}"
+          Write-Host "========================================"
+
+      - name: Validate Token
+        shell: powershell
+        run: |
+          Write-Host "🔐 Validating token.json..."
+          $content = Get-Content token.json -Raw
+          try {
+            $json = $content | ConvertFrom-Json
+            if ($json.refresh_token) {
+              Write-Host "✅ Token has refresh_token"
+            } else {
+              Write-Host "❌ Token MISSING refresh_token!"
+              exit 1
+            }
+            if ($json.client_id) {
+              Write-Host "✅ Token has client_id"
+            } else {
+              Write-Host "❌ Token MISSING client_id!"
+              exit 1
+            }
+          } catch {
+            Write-Host "❌ token.json is INVALID JSON!"
+            Write-Host "   First 100 chars: $($content.Substring(0, [Math]::Min(100, $content.Length)))"
+            exit 1
+          }
+
+      - name: Test YouTube Access
+        shell: powershell
+        run: |
+          Write-Host "🧪 Testing YouTube access..."
+          $env:PATH = $env:PATH + `
+            ";C:\Users\Administrator\.deno\bin"
+          # Test 1: Check yt-dlp can reach YouTube
+          C:\Python312\python.exe -c @"
+          import yt_dlp
+          opts = {'quiet': True, 'skip_download': True, 'socket_timeout': 30}
+          try:
+              with yt_dlp.YoutubeDL(opts) as ydl:
+                  info = ydl.extract_info('https://www.youtube.com/watch?v=jNQXAC9IVRw', download=False, process=False)
+                  print(f'OK - Duration: {info.get(\"duration\", \"?\")}s')
+          except Exception as e:
+              print(f'WARN: {e}')
+          "@
+          Write-Host "✅ YouTube access test done"
+
+      - name: Run Automation
+        shell: powershell
+        run: |
+          $env:PATH = $env:PATH + `
+            ";C:\Users\Administrator\.deno\bin"
+          C:\Python312\python.exe main.py run
+        env:
+          VIDEO_ID:           ${{ env.VIDEO_ID }}
+          VIDEO_URL:          ${{ env.VIDEO_URL }}
+          VIDEO_TITLE:        ${{ env.VIDEO_TITLE }}
+          VIDEO_PRIVACY:      ${{ env.VIDEO_PRIVACY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+
+      - name: Save Database
+        if: always()
+        shell: powershell
+        run: |
+          git config user.name  "automation-bot"
+          git config user.email "bot@github.com"
+          git add database.json
+          git diff --staged --quiet
+          if ($LASTEXITCODE -ne 0) {
+            git commit -m "Update DB [skip ci]"
+            git push
+            Write-Host "✅ Database saved"
+          } else {
+            Write-Host "✅ No changes to save"
+          }
+
+      - name: Show Token Status
+        if: always()
+        shell: powershell
+        run: |
+          if (Test-Path "token.json") {
+            $t = Get-Content token.json | ConvertFrom-Json
+            if ($t.refresh_token) {
+              Write-Host "✅ token.json has refresh_token"
+              Write-Host "⚠️ IMPORTANT: If token was refreshed, update YOUTUBE_TOKEN secret!"
+              Write-Host "   Copy the contents of token.json to your GitHub secret"
+            }
+          } else {
+            Write-Host "⚠️ token.json not found (may have been cleaned up)"
+          }
+
+      - name: Cleanup
+        if: always()
+        shell: powershell
+        run: |
+          Remove-Item -Recurse -Force downloads `
+            -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force processed `
+            -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force thumbnails `
+            -ErrorAction SilentlyContinue
+          Remove-Item -Force token.json `
+            -ErrorAction SilentlyContinue
+          Remove-Item -Force client_secrets.json `
+            -ErrorAction SilentlyContinue
+          Remove-Item -Force cookies.txt `
+            -ErrorAction SilentlyContinue
+          Write-Host "✅ Cleanup done"
