@@ -159,7 +159,7 @@ jobs:
           try:
               with yt_dlp.YoutubeDL(opts) as ydl:
                   info = ydl.extract_info('https://www.youtube.com/watch?v=jNQXAC9IVRw', download=False, process=False)
-                  print(f'OK - Duration: {info.get(\"duration\", \"?\")}s')
+                  print(f'OK - Duration: {info.get("duration", "?")}s')
           except Exception as e:
               print(f'WARN: {e}')
           "@
