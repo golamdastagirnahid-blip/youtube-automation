@@ -143,9 +143,13 @@ jobs:
       - name: Install Dependencies
         shell: powershell
         run: |
-          C:\Python312\python.exe -m pip install -U yt-dlp --quiet
-          C:\Python312\python.exe -m pip install -U bgutil-ytdlp-pot-provider --quiet
-          C:\Python312\python.exe -m pip install -r requirements.txt --quiet
+          Write-Host "Installing yt-dlp..."
+          C:\Python312\python.exe -m pip install -U yt-dlp
+          Write-Host "Installing bgutil-ytdlp-pot-provider..."
+          C:\Python312\python.exe -m pip install -U bgutil-ytdlp-pot-provider
+          Write-Host "Installing requirements.txt..."
+          C:\Python312\python.exe -m pip install -r requirements.txt
+          Write-Host "yt-dlp version:"
           C:\Python312\python.exe -m yt_dlp --version
 
       - name: Setup Cookies
@@ -223,9 +227,13 @@ jobs:
         shell: powershell
         run: |
           $env:PYTHONIOENCODING = "utf-8"
+          Write-Host "Testing yt-dlp..."
           C:\Python312\python.exe -c "import yt_dlp; print('yt-dlp', yt_dlp.version.__version__)"
+          Write-Host "Testing PO Token plugin..."
           C:\Python312\python.exe -c "import bgutil_ytdlp_pot_provider; print('PO Token plugin loaded')"
           Write-Host "FFmpeg: $(Test-Path C:\Python312\ffmpeg.exe)"
+          Write-Host "Node.js: $(Test-Path C:\nodejs\node.exe)"
+          Write-Host "PO Token server: $(Test-Path C:\pot-server\server\build\main.js)"
 
       - name: Run Automation
         shell: powershell
