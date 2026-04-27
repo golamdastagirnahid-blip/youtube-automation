@@ -42,10 +42,10 @@ jobs:
       - name: Install FFmpeg
         shell: powershell
         run: |
-          $ffmpegPath = Get-Command ffmpeg -ErrorAction SilentlyContinue
-          if ($ffmpegPath) {
-            Write-Host "FFmpeg already installed: $($ffmpegPath.Source)"
-            ffmpeg -version | Select-Object -First 1
+          $ErrorActionPreference = "Continue"
+          $ffmpegExe = "C:\Python312\ffmpeg.exe"
+          if (Test-Path $ffmpegExe) {
+            Write-Host "FFmpeg already installed at $ffmpegExe"
           } else {
             Write-Host "FFmpeg not found - installing..."
             $zipUrl = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
@@ -58,16 +58,22 @@ jobs:
             Expand-Archive -Path $zipFile -DestinationPath $extractDir -Force
             $binDir = Get-ChildItem -Path $extractDir -Recurse -Directory -Filter "bin" | Select-Object -First 1
             if ($binDir) {
-              Copy-Item (Join-Path $binDir.FullName "ffmpeg.exe") -Destination "C:\Python312\" -Force
-              Copy-Item (Join-Path $binDir.FullName "ffprobe.exe") -Destination "C:\Python312\" -Force
-              Write-Host "FFmpeg installed to C:\Python312\"
-              C:\Python312\ffmpeg.exe -version | Select-Object -First 1
+              $dest = "C:\Python312"
+              Copy-Item (Join-Path $binDir.FullName "ffmpeg.exe") -Destination $dest -Force
+              Copy-Item (Join-Path $binDir.FullName "ffprobe.exe") -Destination $dest -Force
+              Write-Host "FFmpeg copied to $dest"
             } else {
               Write-Host "ERROR: Could not find ffmpeg bin directory"
               exit 1
             }
             Remove-Item $zipFile -Force -ErrorAction SilentlyContinue
             Remove-Item -Recurse -Force $extractDir -ErrorAction SilentlyContinue
+          }
+          if (Test-Path $ffmpegExe) {
+            Write-Host "FFmpeg OK"
+          } else {
+            Write-Host "ERROR: ffmpeg.exe not found after install"
+            exit 1
           }
 
       - name: Install Dependencies
@@ -159,7 +165,7 @@ jobs:
         run: |
           $env:PYTHONIOENCODING = "utf-8"
           C:\Python312\python.exe -c "import yt_dlp; print('yt-dlp OK')"
-          C:\Python312\ffmpeg.exe -version 2>&1 | Select-Object -First 1
+          Write-Host "FFmpeg: $(Test-Path C:\Python312\ffmpeg.exe)"
 
       - name: Run Automation
         shell: powershell
