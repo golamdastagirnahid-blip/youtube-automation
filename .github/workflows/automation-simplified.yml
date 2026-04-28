@@ -1,0 +1,259 @@
+name: Video Upload (Simplified)
+
+on:
+  repository_dispatch:
+    types: [new_video_detected]
+  workflow_dispatch:
+    inputs:
+      video_id:
+        description: 'YouTube Video ID'
+        required: true
+        default: ''
+      video_url:
+        description: 'YouTube Video URL'
+        required: true
+        default: ''
+      video_title:
+        description: 'Video Title'
+        required: false
+        default: 'Relaxing Video'
+      video_privacy:
+        description: 'Privacy'
+        required: false
+        default: 'public'
+
+jobs:
+  upload:
+    runs-on: self-hosted
+    timeout-minutes: 1440
+    permissions:
+      contents: write
+
+    steps:
+
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+          clean: true
+          fetch-depth: 1
+          ref: main
+
+      - name: Setup Environment
+        shell: powershell
+        run: |
+          Write-Host "=== Setting up environment ==="
+
+          # Find Python
+          $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+          if ($pythonCmd) {
+            $pythonExe = $pythonCmd.Source
+            Write-Host "Python: $pythonExe"
+            & $pythonExe --version
+            echo "PYTHON_EXE=$pythonExe" >> $env:GITHUB_ENV
+          } else {
+            Write-Host "ERROR: Python not found"
+            exit 1
+          }
+
+          # Find FFmpeg
+          $ffmpegCmd = Get-Command ffmpeg -ErrorAction SilentlyContinue
+          if ($ffmpegCmd) {
+            Write-Host "FFmpeg: $($ffmpegCmd.Source)"
+          } else {
+            Write-Host "WARNING: FFmpeg not found in PATH"
+          }
+
+          # Find Node.js
+          $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+          if ($nodeCmd) {
+            Write-Host "Node.js: $($nodeCmd.Source)"
+            & node --version
+          } else {
+            Write-Host "WARNING: Node.js not found in PATH"
+          }
+
+          Write-Host "=== Environment setup complete ==="
+
+      - name: Install Dependencies
+        shell: powershell
+        run: |
+          $pythonExe = $env:PYTHON_EXE
+          Write-Host "=== Installing Python dependencies ==="
+
+          Write-Host "Installing/upgrading yt-dlp..."
+          & $pythonExe -m pip install -U yt-dlp
+
+          Write-Host "Installing pytube (fallback)..."
+          & $pythonExe -m pip install -U pytube
+
+          Write-Host "Installing youtube-dl (fallback)..."
+          & $pythonExe -m pip install -U youtube-dl
+
+          Write-Host "Installing requirements.txt..."
+          & $pythonExe -m pip install -r requirements.txt
+
+          Write-Host "yt-dlp version:"
+          & $pythonExe -m yt_dlp --version
+
+          Write-Host "=== Dependencies installed ==="
+
+      - name: Validate Secrets
+        shell: powershell
+        env:
+          CLIENT_DATA: ${{ secrets.CLIENT_SECRETS }}
+          TOKEN_DATA: ${{ secrets.YOUTUBE_TOKEN }}
+        run: |
+          Write-Host "=== Validating secrets ==="
+
+          if (-not $env:CLIENT_DATA) {
+            Write-Host "ERROR: CLIENT_SECRETS secret not set"
+            exit 1
+          }
+
+          if (-not $env:TOKEN_DATA) {
+            Write-Host "ERROR: YOUTUBE_TOKEN secret not set"
+            exit 1
+          }
+
+          Write-Host "All secrets validated"
+
+      - name: Setup Cookies
+        shell: powershell
+        env:
+          COOKIES_DATA: ${{ secrets.COOKIES_TXT }}
+        run: |
+          if ($env:COOKIES_DATA) {
+            [System.IO.File]::WriteAllText(
+              (Join-Path $PWD "cookies.txt"),
+              $env:COOKIES_DATA
+            )
+            Write-Host "Cookies loaded"
+          } else {
+            Write-Host "No cookies (will use alternative methods)"
+          }
+
+      - name: Create Credentials
+        shell: powershell
+        env:
+          CLIENT_DATA: ${{ secrets.CLIENT_SECRETS }}
+          TOKEN_DATA: ${{ secrets.YOUTUBE_TOKEN }}
+        run: |
+          [System.IO.File]::WriteAllText(
+            (Join-Path $PWD "client_secrets.json"),
+            $env:CLIENT_DATA
+          )
+          [System.IO.File]::WriteAllText(
+            (Join-Path $PWD "token.json"),
+            $env:TOKEN_DATA
+          )
+          Write-Host "Credentials created"
+
+      - name: Create Database If Missing
+        shell: powershell
+        run: |
+          if (-not (Test-Path "database.json")) {
+            [System.IO.File]::WriteAllText(
+              (Join-Path $PWD "database.json"),
+              '{"uploaded_videos":[],"daily_counts":{},"statistics":{"total_uploads":0},"queued":[]}'
+            )
+            Write-Host "database.json created"
+          } else {
+            Write-Host "database.json exists"
+          }
+
+      - name: Set Variables
+        shell: powershell
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $VIDEO_ID      = "${{ github.event.inputs.video_id }}"
+            $VIDEO_URL     = "${{ github.event.inputs.video_url }}"
+            $VIDEO_TITLE   = "${{ github.event.inputs.video_title }}"
+            $VIDEO_PRIVACY = "${{ github.event.inputs.video_privacy }}"
+          } else {
+            $VIDEO_ID      = "${{ github.event.client_payload.video_id }}"
+            $VIDEO_URL     = "${{ github.event.client_payload.video_url }}"
+            $VIDEO_TITLE   = "${{ github.event.client_payload.video_title }}"
+            $VIDEO_PRIVACY = "${{ github.event.client_payload.video_privacy }}"
+          }
+
+          if (-not $VIDEO_PRIVACY) { $VIDEO_PRIVACY = "public" }
+          if (-not $VIDEO_TITLE)   { $VIDEO_TITLE   = "Relaxing Video" }
+
+          if ($VIDEO_ID -match "^([a-zA-Z0-9_-]+)") {
+            $VIDEO_ID = $Matches[1]
+          }
+
+          $VIDEO_URL = $VIDEO_URL -replace '[&?]t=[^&]*', ''
+
+          echo "VIDEO_ID=$VIDEO_ID"           >> $env:GITHUB_ENV
+          echo "VIDEO_URL=$VIDEO_URL"         >> $env:GITHUB_ENV
+          echo "VIDEO_TITLE=$VIDEO_TITLE"     >> $env:GITHUB_ENV
+          echo "VIDEO_PRIVACY=$VIDEO_PRIVACY" >> $env:GITHUB_ENV
+
+          Write-Host "Video ID: $VIDEO_ID"
+          Write-Host "Video URL: $VIDEO_URL"
+          Write-Host "Video Title: $VIDEO_TITLE"
+
+      - name: Test Download
+        shell: powershell
+        run: |
+          $pythonExe = $env:PYTHON_EXE
+          $env:PYTHONIOENCODING = "utf-8"
+
+          Write-Host "=== Testing download ==="
+          Write-Host "Video ID: $env:VIDEO_ID"
+          Write-Host "Video URL: $env:VIDEO_URL"
+
+          # Test yt-dlp info extraction
+          Write-Host "Testing yt-dlp info extraction..."
+          & $pythonExe -c "import yt_dlp; ydl = yt_dlp.YoutubeDL({'quiet': True}); info = ydl.extract_info('$env:VIDEO_URL', download=False); print(f'Title: {info.get(\"title\", \"Unknown\")}'); print(f'Duration: {info.get(\"duration\", 0)} seconds')"
+
+          Write-Host "=== Download test complete ==="
+
+      - name: Run Automation
+        shell: powershell
+        run: |
+          $pythonExe = $env:PYTHON_EXE
+          $env:PYTHONIOENCODING = "utf-8"
+
+          Write-Host "=== Starting automation ==="
+          & $pythonExe main_simplified.py run
+        env:
+          VIDEO_ID:           ${{ env.VIDEO_ID }}
+          VIDEO_URL:          ${{ env.VIDEO_URL }}
+          VIDEO_TITLE:        ${{ env.VIDEO_TITLE }}
+          VIDEO_PRIVACY:      ${{ env.VIDEO_PRIVACY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+
+      - name: Save Database
+        if: always()
+        shell: powershell
+        run: |
+          git config user.name  "automation-bot"
+          git config user.email "bot@github.com"
+          git add database.json
+          git diff --staged --quiet
+          if ($LASTEXITCODE -ne 0) {
+            git commit -m "Update DB [skip ci]"
+            git push
+            Write-Host "Database saved"
+          } else {
+            Write-Host "No changes to save"
+          }
+
+      - name: Cleanup
+        if: always()
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Continue"
+
+          Write-Host "Cleaning up temporary files..."
+          Remove-Item -Recurse -Force downloads -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force processed -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force thumbnails -ErrorAction SilentlyContinue
+          Remove-Item -Force token.json -ErrorAction SilentlyContinue
+          Remove-Item -Force client_secrets.json -ErrorAction SilentlyContinue
+          Remove-Item -Force cookies.txt -ErrorAction SilentlyContinue
+
+          Write-Host "Cleanup done"
