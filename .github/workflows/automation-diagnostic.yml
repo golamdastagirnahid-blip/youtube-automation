@@ -1,0 +1,368 @@
+name: Video Upload (Diagnostic)
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_id:
+        description: 'YouTube Video ID'
+        required: true
+        default: 'YXJC6YKaQXE'
+      video_url:
+        description: 'YouTube Video URL'
+        required: true
+        default: 'https://www.youtube.com/watch?v=YXJC6YKaQXE'
+      video_title:
+        description: 'Video Title'
+        required: false
+        default: 'Heavy Rain Deep Sleep'
+      video_privacy:
+        description: 'Privacy'
+        required: false
+        default: 'public'
+
+jobs:
+  upload:
+    runs-on: self-hosted
+    timeout-minutes: 1440
+    permissions:
+      contents: write
+
+    steps:
+
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+          clean: true
+          fetch-depth: 1
+          ref: main
+
+      - name: Diagnostic - Check Environment
+        shell: powershell
+        run: |
+          Write-Host "=== ENVIRONMENT DIAGNOSTIC ==="
+          Write-Host ""
+
+          # Check Python
+          Write-Host "--- Python ---"
+          $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+          if ($pythonCmd) {
+            Write-Host "Python found: $($pythonCmd.Source)"
+            & python --version
+            echo "PYTHON_EXE=$($pythonCmd.Source)" >> $env:GITHUB_ENV
+          } else {
+            Write-Host "ERROR: Python not found"
+            exit 1
+          }
+
+          # Check FFmpeg
+          Write-Host ""
+          Write-Host "--- FFmpeg ---"
+          $ffmpegCmd = Get-Command ffmpeg -ErrorAction SilentlyContinue
+          if ($ffmpegCmd) {
+            Write-Host "FFmpeg found: $($ffmpegCmd.Source)"
+            & ffmpeg -version 2>&1 | Select-Object -First 1
+          } else {
+            Write-Host "WARNING: FFmpeg not found"
+          }
+
+          # Check Node.js
+          Write-Host ""
+          Write-Host "--- Node.js ---"
+          $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+          if ($nodeCmd) {
+            Write-Host "Node.js found: $($nodeCmd.Source)"
+            & node --version
+          } else {
+            Write-Host "WARNING: Node.js not found"
+          }
+
+          # Check pip
+          Write-Host ""
+          Write-Host "--- pip ---"
+          & python -m pip --version
+
+          # Check installed packages
+          Write-Host ""
+          Write-Host "--- Installed Packages ---"
+          & python -m pip list | Select-String -Pattern "yt-dlp|pytube|youtube-dl|google|requests"
+
+          Write-Host ""
+          Write-Host "=== ENVIRONMENT DIAGNOSTIC COMPLETE ==="
+
+      - name: Install/Upgrade Dependencies
+        shell: powershell
+        run: |
+          Write-Host "=== INSTALLING DEPENDENCIES ==="
+          Write-Host ""
+
+          # Upgrade pip
+          Write-Host "Upgrading pip..."
+          & python -m pip install --upgrade pip
+
+          # Install yt-dlp
+          Write-Host ""
+          Write-Host "Installing yt-dlp..."
+          & python -m pip install --upgrade yt-dlp
+          & python -m yt_dlp --version
+
+          # Install pytube
+          Write-Host ""
+          Write-Host "Installing pytube..."
+          & python -m pip install --upgrade pytube
+
+          # Install youtube-dl
+          Write-Host ""
+          Write-Host "Installing youtube-dl..."
+          & python -m pip install --upgrade youtube-dl
+
+          # Install other requirements
+          Write-Host ""
+          Write-Host "Installing requirements.txt..."
+          if (Test-Path "requirements.txt") {
+            & python -m pip install -r requirements.txt
+          }
+
+          Write-Host ""
+          Write-Host "=== DEPENDENCIES INSTALLED ==="
+
+      - name: Diagnostic - Test yt-dlp
+        shell: powershell
+        run: |
+          Write-Host "=== YT-DLP DIAGNOSTIC ==="
+          Write-Host ""
+
+          # Test import
+          Write-Host "Testing yt-dlp import..."
+          & python -c "import yt_dlp; print('yt-dlp imported successfully'); print('Version:', yt_dlp.version.__version__)"
+
+          # Test with a simple video
+          Write-Host ""
+          Write-Host "Testing yt-dlp with video..."
+          $videoUrl = "${{ github.event.inputs.video_url }}"
+          & python -c "import yt_dlp; ydl = yt_dlp.YoutubeDL({'quiet': True}); info = ydl.extract_info('$videoUrl', download=False); print('Title:', info.get('title', 'Unknown')); print('Duration:', info.get('duration', 0), 'seconds')"
+
+          Write-Host ""
+          Write-Host "=== YT-DLP DIAGNOSTIC COMPLETE ==="
+
+      - name: Diagnostic - Test pytube
+        shell: powershell
+        run: |
+          Write-Host "=== PYTUBE DIAGNOSTIC ==="
+          Write-Host ""
+
+          # Test import
+          Write-Host "Testing pytube import..."
+          & python -c "from pytube import YouTube; print('pytube imported successfully')"
+
+          # Test with a simple video
+          Write-Host ""
+          Write-Host "Testing pytube with video..."
+          $videoUrl = "${{ github.event.inputs.video_url }}"
+          & python -c "from pytube import YouTube; yt = YouTube('$videoUrl'); print('Title:', yt.title); print('Duration:', yt.length, 'seconds')"
+
+          Write-Host ""
+          Write-Host "=== PYTUBE DIAGNOSTIC COMPLETE ==="
+
+      - name: Validate Secrets
+        shell: powershell
+        env:
+          CLIENT_DATA: ${{ secrets.CLIENT_SECRETS }}
+          TOKEN_DATA: ${{ secrets.YOUTUBE_TOKEN }}
+        run: |
+          Write-Host "=== VALIDATING SECRETS ==="
+
+          if (-not $env:CLIENT_DATA) {
+            Write-Host "ERROR: CLIENT_SECRETS secret not set"
+            exit 1
+          }
+
+          if (-not $env:TOKEN_DATA) {
+            Write-Host "ERROR: YOUTUBE_TOKEN secret not set"
+            exit 1
+          }
+
+          Write-Host "All secrets validated"
+
+      - name: Setup Cookies
+        shell: powershell
+        env:
+          COOKIES_DATA: ${{ secrets.COOKIES_TXT }}
+        run: |
+          if ($env:COOKIES_DATA) {
+            [System.IO.File]::WriteAllText(
+              (Join-Path $PWD "cookies.txt"),
+              $env:COOKIES_DATA
+            )
+            Write-Host "Cookies loaded"
+          } else {
+            Write-Host "No cookies (will use alternative methods)"
+          }
+
+      - name: Create Credentials
+        shell: powershell
+        env:
+          CLIENT_DATA: ${{ secrets.CLIENT_SECRETS }}
+          TOKEN_DATA: ${{ secrets.YOUTUBE_TOKEN }}
+        run: |
+          [System.IO.File]::WriteAllText(
+            (Join-Path $PWD "client_secrets.json"),
+            $env:CLIENT_DATA
+          )
+          [System.IO.File]::WriteAllText(
+            (Join-Path $PWD "token.json"),
+            $env:TOKEN_DATA
+          )
+          Write-Host "Credentials created"
+
+      - name: Create Database If Missing
+        shell: powershell
+        run: |
+          if (-not (Test-Path "database.json")) {
+            [System.IO.File]::WriteAllText(
+              (Join-Path $PWD "database.json"),
+              '{"uploaded_videos":[],"daily_counts":{},"statistics":{"total_uploads":0},"queued":[]}'
+            )
+            Write-Host "database.json created"
+          } else {
+            Write-Host "database.json exists"
+          }
+
+      - name: Set Variables
+        shell: powershell
+        run: |
+          $VIDEO_ID      = "${{ github.event.inputs.video_id }}"
+          $VIDEO_URL     = "${{ github.event.inputs.video_url }}"
+          $VIDEO_TITLE   = "${{ github.event.inputs.video_title }}"
+          $VIDEO_PRIVACY = "${{ github.event.inputs.video_privacy }}"
+
+          if (-not $VIDEO_PRIVACY) { $VIDEO_PRIVACY = "public" }
+          if (-not $VIDEO_TITLE)   { $VIDEO_TITLE   = "Relaxing Video" }
+
+          if ($VIDEO_ID -match "^([a-zA-Z0-9_-]+)") {
+            $VIDEO_ID = $Matches[1]
+          }
+
+          $VIDEO_URL = $VIDEO_URL -replace '[&?]t=[^&]*', ''
+
+          echo "VIDEO_ID=$VIDEO_ID"           >> $env:GITHUB_ENV
+          echo "VIDEO_URL=$VIDEO_URL"         >> $env:GITHUB_ENV
+          echo "VIDEO_TITLE=$VIDEO_TITLE"     >> $env:GITHUB_ENV
+          echo "VIDEO_PRIVACY=$VIDEO_PRIVACY" >> $env:GITHUB_ENV
+
+          Write-Host "Video ID: $VIDEO_ID"
+          Write-Host "Video URL: $VIDEO_URL"
+          Write-Host "Video Title: $VIDEO_TITLE"
+
+      - name: Test Download (Detailed)
+        shell: powershell
+        run: |
+          $env:PYTHONIOENCODING = "utf-8"
+
+          Write-Host "=== DETAILED DOWNLOAD TEST ==="
+          Write-Host ""
+
+          $videoUrl = $env:VIDEO_URL
+          $videoId = $env:VIDEO_ID
+
+          Write-Host "Video URL: $videoUrl"
+          Write-Host "Video ID: $videoId"
+          Write-Host ""
+
+          # Test 1: yt-dlp info extraction
+          Write-Host "--- Test 1: yt-dlp info extraction ---"
+          try {
+            $result = & python -c "import yt_dlp; ydl = yt_dlp.YoutubeDL({'quiet': True}); info = ydl.extract_info('$videoUrl', download=False); print('SUCCESS'); print('Title:', info.get('title', 'Unknown')); print('Duration:', info.get('duration', 0))" 2>&1
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host "✓ yt-dlp info extraction successful"
+              Write-Host $result
+            } else {
+              Write-Host "✗ yt-dlp info extraction failed"
+              Write-Host $result
+            }
+          } catch {
+            Write-Host "✗ yt-dlp info extraction error: $_"
+          }
+
+          Write-Host ""
+
+          # Test 2: pytube info extraction
+          Write-Host "--- Test 2: pytube info extraction ---"
+          try {
+            $result = & python -c "from pytube import YouTube; yt = YouTube('$videoUrl'); print('SUCCESS'); print('Title:', yt.title); print('Duration:', yt.length)" 2>&1
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host "✓ pytube info extraction successful"
+              Write-Host $result
+            } else {
+              Write-Host "✗ pytube info extraction failed"
+              Write-Host $result
+            }
+          } catch {
+            Write-Host "✗ pytube info extraction error: $_"
+          }
+
+          Write-Host ""
+
+          # Test 3: yt-dlp download (small test)
+          Write-Host "--- Test 3: yt-dlp download test ---"
+          try {
+            $result = & python -c "import yt_dlp; ydl = yt_dlp.YoutubeDL({'quiet': True, 'format': 'worstaudio', 'max_downloads': 1}); ydl.extract_info('$videoUrl', download=True); print('SUCCESS')" 2>&1
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host "✓ yt-dlp download test successful"
+              Write-Host $result
+            } else {
+              Write-Host "✗ yt-dlp download test failed"
+              Write-Host $result
+            }
+          } catch {
+            Write-Host "✗ yt-dlp download test error: $_"
+          }
+
+          Write-Host ""
+          Write-Host "=== DETAILED DOWNLOAD TEST COMPLETE ==="
+
+      - name: Run Automation
+        shell: powershell
+        run: |
+          $env:PYTHONIOENCODING = "utf-8"
+
+          Write-Host "=== STARTING AUTOMATION ==="
+          & python main_simplified.py run
+        env:
+          VIDEO_ID:           ${{ env.VIDEO_ID }}
+          VIDEO_URL:          ${{ env.VIDEO_URL }}
+          VIDEO_TITLE:        ${{ env.VIDEO_TITLE }}
+          VIDEO_PRIVACY:      ${{ env.VIDEO_PRIVACY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+
+      - name: Save Database
+        if: always()
+        shell: powershell
+        run: |
+          git config user.name  "automation-bot"
+          git config user.email "bot@github.com"
+          git add database.json
+          git diff --staged --quiet
+          if ($LASTEXITCODE -ne 0) {
+            git commit -m "Update DB [skip ci]"
+            git push
+            Write-Host "Database saved"
+          } else {
+            Write-Host "No changes to save"
+          }
+
+      - name: Cleanup
+        if: always()
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Continue"
+
+          Write-Host "Cleaning up temporary files..."
+          Remove-Item -Recurse -Force downloads -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force processed -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force thumbnails -ErrorAction SilentlyContinue
+          Remove-Item -Force token.json -ErrorAction SilentlyContinue
+          Remove-Item -Force client_secrets.json -ErrorAction SilentlyContinue
+          Remove-Item -Force cookies.txt -ErrorAction SilentlyContinue
+
+          Write-Host "Cleanup done"
