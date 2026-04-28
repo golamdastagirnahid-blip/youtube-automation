@@ -104,19 +104,36 @@ def is_upload_running():
 # Load Database
 # ─────────────────────────────────────────────
 def load_db():
+    """Load database with standardized format"""
     if os.path.exists("database.json"):
         try:
             with open("database.json") as f:
-                return json.load(f)
+                data = json.load(f)
+            # Ensure all required fields exist
+            if "uploaded_videos" not in data:
+                data["uploaded_videos"] = []
+            if "daily_counts" not in data:
+                data["daily_counts"] = {}
+            if "statistics" not in data:
+                data["statistics"] = {"total_uploads": 0}
+            if "queued" not in data:
+                data["queued"] = []
+            return data
         except Exception:
             pass
-    return {"uploaded": {}, "queued": []}
+    return {
+        "uploaded_videos": [],
+        "daily_counts": {},
+        "statistics": {"total_uploads": 0},
+        "queued": []
+    }
 
 
 # ─────────────────────────────────────────────
 # Save Database
 # ─────────────────────────────────────────────
 def save_db(db):
+    """Save database to file"""
     with open("database.json", "w") as f:
         json.dump(db, f, indent=2)
 
@@ -125,10 +142,8 @@ def save_db(db):
 # Is Video Already Processed
 # ─────────────────────────────────────────────
 def is_processed(db, video_id):
-    # Check "uploaded" dict (monitor's format)
-    if video_id in db.get("uploaded", {}):
-        return True
-    # Check "uploaded_videos" list (main.py's format)
+    """Check if video has already been processed"""
+    # Check uploaded_videos list (main.py's format)
     if video_id in db.get("uploaded_videos", []):
         return True
     # Check queued
@@ -143,6 +158,7 @@ def is_processed(db, video_id):
 # Add To Queue
 # ─────────────────────────────────────────────
 def add_to_queue(db, video):
+    """Add video to processing queue"""
     if "queued" not in db:
         db["queued"] = []
     db["queued"].append({
@@ -157,6 +173,7 @@ def add_to_queue(db, video):
 # Get Next From Queue
 # ─────────────────────────────────────────────
 def get_next_from_queue(db):
+    """Get next video from queue"""
     queued = db.get("queued", [])
     if queued:
         return queued[0]
@@ -167,6 +184,7 @@ def get_next_from_queue(db):
 # Remove From Queue
 # ─────────────────────────────────────────────
 def remove_from_queue(db, video_id):
+    """Remove video from queue"""
     queued = db.get("queued", [])
     db["queued"] = [
         q for q in queued
@@ -178,19 +196,21 @@ def remove_from_queue(db, video_id):
 # Mark As Triggered
 # ─────────────────────────────────────────────
 def mark_triggered(db, video_id, title):
-    if "uploaded" not in db:
-        db["uploaded"] = {}
-    db["uploaded"][video_id] = {
-        "title"      : title,
-        "triggered_at": datetime.now().isoformat(),
-        "status"     : "triggered"
-    }
+    """Mark video as triggered for upload"""
+    if video_id not in db.get("uploaded_videos", []):
+        db["uploaded_videos"].append(video_id)
+        db["statistics"]["total_uploads"] += 1
+        today = datetime.now().strftime("%Y-%m-%d")
+        db["daily_counts"][today] = (
+            db["daily_counts"].get(today, 0) + 1
+        )
 
 
 # ─────────────────────────────────────────────
 # Check Single Channel RSS
 # ─────────────────────────────────────────────
 def check_channel(channel_id, db):
+    """Check a single channel for new videos"""
     url = (
         f"https://www.youtube.com/feeds/videos.xml"
         f"?channel_id={channel_id}"
@@ -234,6 +254,7 @@ def check_channel(channel_id, db):
 # Load Channels
 # ─────────────────────────────────────────────
 def load_channels():
+    """Load channel IDs from channels.txt"""
     channels = []
     if os.path.exists("channels.txt"):
         with open("channels.txt") as f:
@@ -248,6 +269,7 @@ def load_channels():
 # Main Monitor Function
 # ─────────────────────────────────────────────
 def main():
+    """Main monitor function"""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"🔍 Channel Monitor: {now}")
     print("=" * 50)
@@ -328,9 +350,8 @@ def main():
             )
 
             if success:
-                # Remove from queue
+                # Remove from queue and mark as triggered
                 remove_from_queue(db, next_video["video_id"])
-                # Mark as triggered
                 mark_triggered(
                     db,
                     next_video["video_id"],

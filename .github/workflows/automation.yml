@@ -39,100 +39,160 @@ jobs:
           fetch-depth: 1
           ref: main
 
+      - name: Detect Python Installation
+        shell: powershell
+        run: |
+          Write-Host "Detecting Python installation..."
+          $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+          if ($pythonCmd) {
+            $pythonExe = $pythonCmd.Source
+            Write-Host "Python found: $pythonExe"
+            & $pythonExe --version
+            echo "PYTHON_EXE=$pythonExe" >> $env:GITHUB_ENV
+          } else {
+            Write-Host "ERROR: Python not found in PATH"
+            Write-Host "Please install Python and add it to PATH"
+            exit 1
+          }
+
       - name: Install FFmpeg
         shell: powershell
         run: |
           $ErrorActionPreference = "Continue"
-          $ffmpegExe = "C:\Python312\ffmpeg.exe"
+          $pythonExe = $env:PYTHON_EXE
+          $pythonDir = Split-Path -Parent $pythonExe
+          $ffmpegExe = Join-Path $pythonDir "ffmpeg.exe"
+
           if (Test-Path $ffmpegExe) {
-            Write-Host "FFmpeg already installed"
+            Write-Host "FFmpeg already installed at $ffmpegExe"
           } else {
-            Write-Host "Installing FFmpeg..."
+            Write-Host "Installing FFmpeg to $pythonDir..."
             $zipUrl = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
             $zipFile = Join-Path $env:TEMP "ffmpeg.zip"
             $extractDir = Join-Path $env:TEMP "ffmpeg_extract"
+
+            Write-Host "Downloading FFmpeg..."
             Invoke-WebRequest -Uri $zipUrl -OutFile $zipFile -UseBasicParsing
+
             if (Test-Path $extractDir) { Remove-Item -Recurse -Force $extractDir }
             Expand-Archive -Path $zipFile -DestinationPath $extractDir -Force
+
             $binDir = Get-ChildItem -Path $extractDir -Recurse -Directory -Filter "bin" | Select-Object -First 1
             if ($binDir) {
-              $dest = "C:\Python312"
-              Copy-Item (Join-Path $binDir.FullName "ffmpeg.exe") -Destination $dest -Force
-              Copy-Item (Join-Path $binDir.FullName "ffprobe.exe") -Destination $dest -Force
-              Write-Host "FFmpeg installed"
+              Copy-Item (Join-Path $binDir.FullName "ffmpeg.exe") -Destination $pythonDir -Force
+              Copy-Item (Join-Path $binDir.FullName "ffprobe.exe") -Destination $pythonDir -Force
+              Write-Host "FFmpeg installed successfully"
             } else {
-              Write-Host "ERROR: ffmpeg bin not found"; exit 1
+              Write-Host "ERROR: ffmpeg bin not found"
+              exit 1
             }
+
             Remove-Item $zipFile -Force -ErrorAction SilentlyContinue
             Remove-Item -Recurse -Force $extractDir -ErrorAction SilentlyContinue
           }
-          if (-not (Test-Path $ffmpegExe)) { Write-Host "ERROR: ffmpeg missing"; exit 1 }
+
+          if (-not (Test-Path $ffmpegExe)) {
+            Write-Host "ERROR: ffmpeg missing after installation"
+            exit 1
+          }
+
+          & $ffmpegExe -version 2>&1 | Select-Object -First 1
           Write-Host "FFmpeg OK"
 
-      - name: Install Node.js
+      - name: Detect/Install Node.js
         shell: powershell
         run: |
           $ErrorActionPreference = "Continue"
-          if (Test-Path "C:\nodejs\node.exe") {
+          $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+
+          if ($nodeCmd) {
             Write-Host "Node.js already installed"
-            C:\nodejs\node.exe --version
+            & node --version
+            $nodeDir = Split-Path -Parent $nodeCmd.Source
           } else {
             Write-Host "Installing Node.js..."
             $nodeUrl = "https://nodejs.org/dist/v22.15.0/node-v22.15.0-win-x64.zip"
             $zipFile = Join-Path $env:TEMP "nodejs.zip"
+            $nodeDir = Join-Path $env:TEMP "node-v22.15.0-win-x64"
+
             Invoke-WebRequest -Uri $nodeUrl -OutFile $zipFile -UseBasicParsing
             Expand-Archive -Path $zipFile -DestinationPath $env:TEMP -Force
-            $nodeDir = Get-ChildItem -Path $env:TEMP -Directory -Filter "node-v*" | Select-Object -First 1
-            if ($nodeDir) {
-              if (Test-Path "C:\nodejs") { Remove-Item -Recurse -Force "C:\nodejs" }
-              Move-Item $nodeDir.FullName "C:\nodejs" -Force
-              Write-Host "Node.js installed"
-              C:\nodejs\node.exe --version
-            } else {
-              Write-Host "ERROR: Node.js extraction failed"; exit 1
+
+            if (-not (Test-Path $nodeDir)) {
+              Write-Host "ERROR: Node.js extraction failed"
+              exit 1
             }
+
+            & node --version
+            Write-Host "Node.js installed"
             Remove-Item $zipFile -Force -ErrorAction SilentlyContinue
           }
-          echo "C:\nodejs" >> $env:GITHUB_PATH
+
+          echo "NODE_DIR=$nodeDir" >> $env:GITHUB_ENV
+          echo "NODE_EXE=$nodeExe" >> $env:GITHUB_ENV
 
       - name: Install PO Token Server
         shell: powershell
         run: |
-          $potDir = "C:\pot-server"
+          $ErrorActionPreference = "Continue"
+          $potDir = Join-Path $env:TEMP "pot-server"
           $buildFile = Join-Path $potDir "server\build\main.js"
+
           if (Test-Path $buildFile) {
             Write-Host "PO Token server already built"
           } else {
             Write-Host "Setting up PO Token server..."
             if (Test-Path $potDir) { Remove-Item -Recurse -Force $potDir }
+
+            Write-Host "Cloning PO Token server..."
             git clone --depth 1 https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git $potDir
+
             if (-not (Test-Path (Join-Path $potDir "server\package.json"))) {
-              Write-Host "ERROR: git clone failed"; exit 1
+              Write-Host "ERROR: git clone failed"
+              exit 1
             }
+
             Write-Host "Running npm ci..."
             Set-Location (Join-Path $potDir "server")
-            C:\nodejs\npm.cmd ci
-            if ($LASTEXITCODE -ne 0) { Write-Host "ERROR: npm ci failed"; exit 1 }
+            & npm ci
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "ERROR: npm ci failed"
+              exit 1
+            }
+
             Write-Host "Running tsc..."
-            C:\nodejs\npx.cmd tsc
-            if ($LASTEXITCODE -ne 0) { Write-Host "ERROR: tsc failed"; exit 1 }
+            & npx tsc
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "ERROR: tsc failed"
+              exit 1
+            }
+
             if (Test-Path $buildFile) {
               Write-Host "PO Token server built successfully"
             } else {
-              Write-Host "ERROR: build output not found"; exit 1
+              Write-Host "ERROR: build output not found"
+              exit 1
             }
           }
+
+          echo "POT_DIR=$potDir" >> $env:GITHUB_ENV
 
       - name: Start PO Token Server
         shell: powershell
         run: |
-          $serverScript = "C:\pot-server\server\build\main.js"
+          $serverScript = Join-Path $env:POT_DIR "server\build\main.js"
+
           if (-not (Test-Path $serverScript)) {
-            Write-Host "ERROR: PO Token server not found"; exit 1
+            Write-Host "ERROR: PO Token server not found at $serverScript"
+            exit 1
           }
+
           Write-Host "Starting PO Token server on port 4416..."
-          Start-Process -NoNewWindow -FilePath "C:\nodejs\node.exe" -ArgumentList $serverScript
+          Start-Process -NoNewWindow -FilePath "node" -ArgumentList $serverScript
+
+          Write-Host "Waiting for server to start..."
           Start-Sleep -Seconds 5
+
           try {
             $response = Invoke-WebRequest -Uri "http://127.0.0.1:4416" -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
             Write-Host "PO Token server running (status: $($response.StatusCode))"
@@ -140,17 +200,44 @@ jobs:
             Write-Host "PO Token server started (no health endpoint, but process is running)"
           }
 
-      - name: Install Dependencies
+      - name: Install Python Dependencies
         shell: powershell
         run: |
-          Write-Host "Installing yt-dlp..."
-          C:\Python312\python.exe -m pip install -U yt-dlp
+          $pythonExe = $env:PYTHON_EXE
+
+          Write-Host "Installing/upgrading yt-dlp..."
+          & $pythonExe -m pip install -U yt-dlp
+
           Write-Host "Installing bgutil-ytdlp-pot-provider..."
-          C:\Python312\python.exe -m pip install -U bgutil-ytdlp-pot-provider
+          & $pythonExe -m pip install -U bgutil-ytdlp-pot-provider
+
           Write-Host "Installing requirements.txt..."
-          C:\Python312\python.exe -m pip install -r requirements.txt
+          & $pythonExe -m pip install -r requirements.txt
+
           Write-Host "yt-dlp version:"
-          C:\Python312\python.exe -m yt_dlp --version
+          & $pythonExe -m yt_dlp --version
+
+      - name: Validate Secrets
+        shell: powershell
+        env:
+          CLIENT_DATA: ${{ secrets.CLIENT_SECRETS }}
+          TOKEN_DATA: ${{ secrets.YOUTUBE_TOKEN }}
+        run: |
+          $ErrorActionPreference = "Continue"
+
+          if (-not $env:CLIENT_DATA) {
+            Write-Host "ERROR: CLIENT_SECRETS secret not set"
+            Write-Host "Please add CLIENT_SECRETS to your repository secrets"
+            exit 1
+          }
+
+          if (-not $env:TOKEN_DATA) {
+            Write-Host "ERROR: YOUTUBE_TOKEN secret not set"
+            Write-Host "Please add YOUTUBE_TOKEN to your repository secrets"
+            exit 1
+          }
+
+          Write-Host "All required secrets validated"
 
       - name: Setup Cookies
         shell: powershell
@@ -210,30 +297,45 @@ jobs:
             $VIDEO_TITLE   = "${{ github.event.client_payload.video_title }}"
             $VIDEO_PRIVACY = "${{ github.event.client_payload.video_privacy }}"
           }
+
           if (-not $VIDEO_PRIVACY) { $VIDEO_PRIVACY = "public" }
           if (-not $VIDEO_TITLE)   { $VIDEO_TITLE   = "Relaxing Video" }
+
           if ($VIDEO_ID -match "^([a-zA-Z0-9_-]+)") {
             $VIDEO_ID = $Matches[1]
           }
+
           $VIDEO_URL = $VIDEO_URL -replace '[&?]t=[^&]*', ''
+
           echo "VIDEO_ID=$VIDEO_ID"           >> $env:GITHUB_ENV
           echo "VIDEO_URL=$VIDEO_URL"         >> $env:GITHUB_ENV
           echo "VIDEO_TITLE=$VIDEO_TITLE"     >> $env:GITHUB_ENV
           echo "VIDEO_PRIVACY=$VIDEO_PRIVACY" >> $env:GITHUB_ENV
+
           Write-Host "Video ID: $VIDEO_ID"
           Write-Host "Video URL: $VIDEO_URL"
+          Write-Host "Video Title: $VIDEO_TITLE"
 
       - name: Test Setup
         shell: powershell
         run: |
+          $pythonExe = $env:PYTHON_EXE
           $env:PYTHONIOENCODING = "utf-8"
+
+          Write-Host "=== Setup Verification ==="
+          Write-Host "Python: $pythonExe"
+          & $pythonExe --version
+
           Write-Host "Testing yt-dlp..."
-          C:\Python312\python.exe -c "import yt_dlp; print('yt-dlp', yt_dlp.version.__version__)"
+          & $pythonExe -c "import yt_dlp; print('yt-dlp', yt_dlp.version.__version__)"
+
           Write-Host "Testing PO Token provider..."
-          C:\Python312\python.exe -c "import bgutil_ytdlp_pot_provider; print('PO Token provider OK')"
-          Write-Host "FFmpeg: $(Test-Path C:\Python312\ffmpeg.exe)"
-          Write-Host "Node.js: $(Test-Path C:\nodejs\node.exe)"
-          Write-Host "PO Token server: $(Test-Path C:\pot-server\server\build\main.js)"
+          & $pythonExe -c "import bgutil_ytdlp_pot_provider; print('PO Token provider OK')"
+
+          Write-Host "FFmpeg: $(Test-Path (Join-Path (Split-Path -Parent $pythonExe) 'ffmpeg.exe'))"
+          Write-Host "Node.js: $(Test-Path (Join-Path $env:NODE_DIR 'node.exe'))"
+          Write-Host "PO Token server: $(Test-Path (Join-Path $env:POT_DIR 'server\build\main.js'))"
+
           Write-Host "Testing PO Token server connection..."
           try {
             $response = Invoke-WebRequest -Uri "http://127.0.0.1:4416" -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
@@ -242,11 +344,16 @@ jobs:
             Write-Host "PO Token server not responding - check if running"
           }
 
+          Write-Host "=== Setup Complete ==="
+
       - name: Run Automation
         shell: powershell
         run: |
+          $pythonExe = $env:PYTHON_EXE
           $env:PYTHONIOENCODING = "utf-8"
-          C:\Python312\python.exe main.py run
+
+          Write-Host "Starting automation..."
+          & $pythonExe main.py run
         env:
           VIDEO_ID:           ${{ env.VIDEO_ID }}
           VIDEO_URL:          ${{ env.VIDEO_URL }}
@@ -275,11 +382,16 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = "Continue"
+
+          Write-Host "Stopping PO Token server..."
           Get-Process -Name "node" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+          Write-Host "Cleaning up temporary files..."
           Remove-Item -Recurse -Force downloads -ErrorAction SilentlyContinue
           Remove-Item -Recurse -Force processed -ErrorAction SilentlyContinue
           Remove-Item -Recurse -Force thumbnails -ErrorAction SilentlyContinue
           Remove-Item -Force token.json -ErrorAction SilentlyContinue
           Remove-Item -Force client_secrets.json -ErrorAction SilentlyContinue
           Remove-Item -Force cookies.txt -ErrorAction SilentlyContinue
+
           Write-Host "Cleanup done"
