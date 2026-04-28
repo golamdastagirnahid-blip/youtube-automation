@@ -152,65 +152,6 @@ jobs:
           Write-Host "yt-dlp version:"
           C:\Python312\python.exe -m yt_dlp --version
 
-      - name: Install PO Token Plugin in Correct Location
-        shell: powershell
-        run: |
-          Write-Host "Setting up PO Token plugin in yt-dlp plugins directory..."
-          $pluginDir = Join-Path $env:APPDATA "yt-dlp\plugins"
-          if (-not (Test-Path $pluginDir)) {
-            New-Item -ItemType Directory -Path $pluginDir -Force | Out-Null
-            Write-Host "Created plugin directory: $pluginDir"
-          }
-          # Find plugin files in site-packages
-          $sitePackages = "C:\Python312\Lib\site-packages"
-          $sourcePlugin = Join-Path $sitePackages "yt_dlp_plugins"
-          Write-Host "Looking for plugin at: $sourcePlugin"
-          if (Test-Path $sourcePlugin) {
-            Copy-Item -Path $sourcePlugin -Destination $pluginDir -Recurse -Force
-            Write-Host "Copied plugin files to: $pluginDir"
-            Write-Host "Plugin files:"
-            Get-ChildItem -Path (Join-Path $pluginDir "yt_dlp_plugins") -Recurse | Select-Object FullName
-          } else {
-            Write-Host "ERROR: Plugin source not found at: $sourcePlugin"
-            Write-Host "Searching for yt_dlp_plugins in site-packages..."
-            Get-ChildItem -Path $sitePackages -Filter "yt_dlp_plugins" -Recurse -Directory | Select-Object FullName
-            exit 1
-          }
-
-      - name: Alternative Plugin Setup (2026 Bypass)
-        shell: powershell
-        run: |
-          Write-Host "Setting up alternative plugin location..."
-          # Try multiple plugin locations
-          $locations = @(
-            "C:\Python312\Lib\site-packages\yt_dlp_plugins",
-            "C:\Python312\yt-dlp-plugins",
-            "$env:APPDATA\yt-dlp\plugins\yt_dlp_plugins"
-          )
-          foreach ($loc in $locations) {
-            if (Test-Path $loc) {
-              Write-Host "Found plugin at: $loc"
-              # Copy to all possible yt-dlp plugin locations
-              $destDirs = @(
-                "$env:APPDATA\yt-dlp\plugins",
-                "C:\Python312\yt-dlp-plugins",
-                "$env:USERPROFILE\.yt-dlp\plugins"
-              )
-              foreach ($dest in $destDirs) {
-                # Skip if source and destination are the same
-                if ($loc -eq $dest) {
-                  Write-Host "  Skipping: source and destination are the same"
-                  continue
-                }
-                if (-not (Test-Path $dest)) {
-                  New-Item -ItemType Directory -Path $dest -Force | Out-Null
-                }
-                Copy-Item -Path $loc -Destination $dest -Recurse -Force
-                Write-Host "  Copied to: $dest"
-              }
-            }
-          }
-
       - name: Setup Cookies
         shell: powershell
         env:
@@ -288,22 +229,18 @@ jobs:
           $env:PYTHONIOENCODING = "utf-8"
           Write-Host "Testing yt-dlp..."
           C:\Python312\python.exe -c "import yt_dlp; print('yt-dlp', yt_dlp.version.__version__)"
-          Write-Host "Testing PO Token plugin (via yt-dlp)..."
-          C:\Python312\python.exe -m yt_dlp --version
+          Write-Host "Testing PO Token provider..."
+          C:\Python312\python.exe -c "import bgutil_ytdlp_pot_provider; print('PO Token provider OK')"
           Write-Host "FFmpeg: $(Test-Path C:\Python312\ffmpeg.exe)"
           Write-Host "Node.js: $(Test-Path C:\nodejs\node.exe)"
           Write-Host "PO Token server: $(Test-Path C:\pot-server\server\build\main.js)"
-          Write-Host "Verifying PO Token plugin installation..."
-          $pluginDir = Join-Path $env:APPDATA "yt-dlp\plugins\yt_dlp_plugins"
-          if (Test-Path $pluginDir) {
-            Write-Host "Plugin directory exists: $pluginDir"
-            Write-Host "Plugin files:"
-            Get-ChildItem -Path $pluginDir -Recurse | Select-Object FullName
-          } else {
-            Write-Host "WARNING: Plugin directory not found at: $pluginDir"
+          Write-Host "Testing PO Token server connection..."
+          try {
+            $response = Invoke-WebRequest -Uri "http://127.0.0.1:4416" -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue
+            Write-Host "PO Token server responding (status: $($response.StatusCode))"
+          } catch {
+            Write-Host "PO Token server not responding - check if running"
           }
-          Write-Host "Testing PO Token provider with verbose output..."
-          C:\Python312\python.exe -c "import yt_dlp; ydl = yt_dlp.YoutubeDL({'verbose': True, 'quiet': False}); print('PO Token test complete')" 2>&1 | Select-String -Pattern "PO Token" -Context 0,2
 
       - name: Run Automation
         shell: powershell
